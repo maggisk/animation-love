@@ -12,6 +12,7 @@ function Text.print(text, size, x, y)
   love.graphics.print(text, x or 0, y or 0)
 end
 
+
 local Area = util.Object:extend()
 function Area:new(parent, options)
   self.parent = parent
@@ -104,7 +105,7 @@ function Rectangle:draw(o)
   local background = (o and o.background) or self.background
   if background then
     love.graphics.setColor(background)
-    love.graphics.rectangle("fill", 0, 0, self.w, self.h)
+    love.graphics.rectangle("fill", 0, 0, self.w, self.h, o.radius)
   end
   self.x, self.y = love.graphics.transformPoint(0, 0)
 end

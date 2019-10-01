@@ -205,11 +205,8 @@ newButton(editTab, {text = 'Redo'})
 -- TODO: layer subtabs - delete etc.
 
 -- frame subtabs
---newButton(frameTab, {text = 'easing'}):on('mousepressed', function() state.showEasingPicker = true end)
 function setEasing(tab) state.currentFrame.easing = tab.id end
-newButton(frameTab, {text = 'linear', id = 'linear'}):on('mousepressed', setEasing)
-newButton(frameTab, {text = 'fast to slow', id = 'easeOut'}):on('mousepressed', setEasing)
-newButton(frameTab, {text = 'slow to fast', id = 'easeIn'}):on('mousepressed', setEasing)
+local easingButton = newButton(frameTab, {text = 'linear speed'}):on('mousepressed', function() state.showEasingPicker = true end)
 newButton(frameTab, {text = 'move left'}):on('mousepressed', function()
   local i = util.findIndex(state.frames, state.currentFrame)
   util.swapwrap(state.frames, i, i - 1)
@@ -250,6 +247,13 @@ local newFrameButton = ui.Rectangle(state.ui):on('mousepressed', addNewFrame)
 -- error message
 local errorMessage = newButton(state.ui):on('mousepressed', function() state.error = nil end)
 
+local ew = ui.Rectangle(state.ui):on('mousepressed', function() state.showEasingPicker = false end)
+local function setEasingFunc(button) state.currentFrame.easing = button.easing end
+ui.Rectangle(ew, {easing = "linear"}):on('mousepressed', setEasingFunc)
+ui.Rectangle(ew, {easing = "easeIn"}):on('mousepressed', setEasingFunc)
+ui.Rectangle(ew, {easing = "easeInx2"}):on('mousepressed', setEasingFunc)
+ui.Rectangle(ew, {easing = "easeOut"}):on('mousepressed', setEasingFunc)
+ui.Rectangle(ew, {easing = "easeOutx2"}):on('mousepressed', setEasingFunc)
 
 -- drawing functions
 local draw = {}
@@ -343,6 +347,7 @@ function draw.header()
   end
 
   -- subtabs
+  easingButton.text = state.currentFrame.easing
   header:gotoPosition(layout.sidebar.width, layout.header.height - h)
   for _, tab in ipairs(state.menu.children) do
     tab:draw({height = h, selected = (tab.id == state.currentFrame.easing)}):layout(ui.right)
@@ -427,7 +432,42 @@ end
 function draw.easingPicker()
   if not state.showEasingPicker then return end
 
-  -- TODO: something like this to pick an easing function: https://easings.net/en
+  ew:draw({width = layout.window.width, height = layout.window.height, background = {0, 0, 0, 0.6}})
+
+  local wpad = 50
+  ew:gotoPosition(wpad, wpad)
+
+  local w, h = 200, 150
+  local pad = 20
+  for _, button in ipairs(ew.children) do
+    -- background
+    button:draw({width = w, height = h, background = {0, 0, 0, 0.8}, radius = 10})
+
+    -- draw animation curve
+    local line = {}
+    for i = 0, 100 do
+      line[#line+1] = pad + i / 100 * (w - pad * 2)
+      line[#line+1] = h - pad * 2 - util.easings[button.easing](i / 100) * (h - pad * 2 - 30)
+    end
+    love.graphics.setColor(colors.button.selected.background)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(line)
+
+    -- dot to show the speed of the animation
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.circle("fill", w - pad, h - pad * 2 - util.easings[button.easing](state.duration % 1) * (h - pad * 2 - 30), 4)
+    local tw, th = ui.Text.getDimensions(button.easing, 18)
+
+    -- name
+    ui.Text.print(button.easing, 18, w / 2 - tw / 2, h * 0.8)
+
+    -- layout - go to next line when we run out of space
+    button:layout(ui.right, wpad)
+    local x, y = love.graphics.transformPoint(0, 0)
+    if x + w + wpad > layout.window.width then
+      love.graphics.translate(-x + wpad, h + pad)
+    end
+  end
 end
 
 function love.load()
@@ -439,19 +479,19 @@ function love.draw()
   love.graphics.clear(colors.background)
   state.ui:updateAll({visible = false})
 
-  for _, f in ipairs({draw.header, draw.footer, draw.sidebar, draw.animationArea}) do
+  for _, name in ipairs({"header", "footer", "sidebar", "animationArea", "easingPicker"}) do
     love.graphics.reset()
     love.graphics.origin()
-    f()
+    draw[name]()
   end
 end
 
 function love.update(dt)
   state.duration = state.duration + dt
   -- TODO: loop or no loop?
-  -- if state.duration > state.timePerFrame * #state.frames then
-  --   state.playing = false
-  -- end
+  if state.duration > state.timePerFrame * #state.frames then
+    state.playing = false
+  end
   -- TODO: limit framerate when not playing animation?
 end
 

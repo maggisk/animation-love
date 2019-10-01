@@ -132,9 +132,16 @@ end
 function module.easings.easeIn(t)
   return t*t
 end
+function module.easings.easeInx2(t)
+  return t*t*t
+end
 function module.easings.easeOut(t)
   t = t - 1
   return 1-(t*t)
+end
+function module.easings.easeOutx2(t)
+  t = t - 1
+  return 1-(t*t*-t)
 end
 
 return module
