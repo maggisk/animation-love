@@ -38,7 +38,7 @@ function Area:getCenter()
   return self.x + self.w / 2, self.y + self.h / 2
 end
 
-function Area:gotoPosition(x, y)
+function Area:moveTo(x, y)
   love.graphics.origin()
   love.graphics.translate(self.x + (x or 0), self.y + (y or 0))
 end

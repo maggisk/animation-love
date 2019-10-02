@@ -1,4 +1,4 @@
-local json = require "json"
+local Animation = require "animation"
 local util = require "util"
 local ui = require "ui"
 
@@ -22,152 +22,58 @@ local colors = {
 
 -- global state
 local state = {}
-state.zoom = 1
+state.zoom = 1 -- not used yet
 state.playing = false
 state.duration = 0
 state.timePerFrame = 0.3
-state.layers = {}
-state.frames = {}
 state.showEasingPicker = false
+state.rotation = {}
 state.ui = ui.Area()
+state.animation = Animation()
+state.frame = state.animation.frames[1]
+state.layer = false
 
--- a layer in animation (an image)
-local Layer = util.Object:extend()
-function Layer:new(imageData, rawData, fileData)
-  self.x, self.y = 0, 0
-  self.imageData = imageData
-  self.rawData = rawData
-  self.fileData = fileData
-  self.image = love.graphics.newImage(imageData)
-  self.orientation = 0
-end
-
--- a frame in the animation
-local Frame = util.Object:extend()
-function Frame:new(data)
-  self.data = data or {}
-  self.easing = "linear"
-end
-
-function Frame:get(layer, name, default)
-  self.data[layer] = self.data[layer] or {}
-  return self.data[layer][name] or default
-end
-
-function Frame:set(layer, name, v)
-  self.data[layer] = self.data[layer] or {}
-  self.data[layer][name] = v
-end
-
-function Frame:rotate(layer, x, y)
-  local lx = self:get(layer, 'x', 0)
-  local ly = self:get(layer, 'y', 0)
-  self:set(layer, 'orientation', self.start.orientation + math.atan2(ly - y, lx - x) - math.atan2(ly - self.start.y, lx - self.start.x))
-end
-
-function Frame:startRotation(layer, x, y)
-  self.start = {x = x, y = y, orientation = self:get(layer, 'orientation', 0)}
-end
-
--- create initial frame
-local firstFrame = Frame()
-table.insert(state.frames, firstFrame)
-state.currentFrame = firstFrame
-
--- save animation to disk
-local function saveToDisk()
-  local savedir = "joints-save-" .. love.math.random(10000)
-  if love.filesystem.getInfo(savedir) then
-    for _, f in ipairs(love.filesystem.getDirectoryItems(savedir)) do
-      love.filesystem.remove(savedir .. '/' .. f)
-    end
-  end
-  love.filesystem.createDirectory(savedir)
-
-  local data = {version = 1, timePerFrame = state.timePerFrame, frames = {}, layers = {}}
-
-  for i, frame in ipairs(state.frames) do
-    data.frames[i] = {}
-    for j, layer in ipairs(state.layers) do
-      data.frames[i][j] = {
-        x = frame:get(layer, 'x', 0),
-        y = frame:get(layer, 'y', 0),
-        orientation = frame:get(layer, 'orientation', 0),
-      }
-    end
-  end
-
-  for i, layer in ipairs(state.layers) do
-    data.layers[i] = {
-      fileData = layer.fileData
-    }
-  end
-
-  local success, message = love.filesystem.write(savedir .. "/data.json", json.encode(data))
-  if not success then return message end
-
-  for _, layer in ipairs(state.layers) do
-    local success, message = love.filesystem.write(savedir .. "/" .. layer.fileData.fullname, layer.rawData)
-    if not success then return message end
-  end
-
-  love.system.openURL("file://" .. love.filesystem.getSaveDirectory() .. "/" .. savedir)
-end
-
--- load back previously saved animation
-local function loadFromDisk(savedir)
-  local s, message = love.filesystem.read(savedir .. "/data.json")
-  if not s then return message end
-  local data = json.decode(s)
-
-  state.timePerFrame = data.timePerFrame
-  state.frames = {}
-  state.layers = {}
-
-  for i, layer in ipairs(data.layers) do
-    local rawData, message = love.filesystem.read(savedir .. "/" .. layer.fileData.fullname)
-    if not rawData then return message end
-    local imageData = love.image.newImageData(love.filesystem.newFileData(rawData, layer.fileData.fullname))
-    table.insert(state.layers, Layer(imageData, rawData, layer.fileData))
-  end
-
-  for i, frameData in ipairs(data.frames) do
-    local frame = Frame()
-    for j, layer in ipairs(state.layers) do
-      for k, v in pairs(frameData[j]) do
-        frame:set(layer, k, v)
-      end
-    end
-    table.insert(state.frames, frame)
-  end
-
-  state.currentLayer = state.layers[1]
-  state.currentFrame = state.frames[1]
-end
-
--- utility functions
-local function elapsedPercentage(fdiff)
-  local total = (#state.frames + (fdiff or 0)) * state.timePerFrame
-  return (state.duration % total) / total
-end
-
-local function adjustLayerPos(x, y)
-  local f = state.currentFrame
-  local layer = state.currentLayer
-  if f and layer then
-    f:set(layer, 'x', f:get(layer, 'x', 0) + x)
-    f:set(layer, 'y', f:get(layer, 'y', 0) + y)
+-- keyboard and mouse event handlers 
+local function adjustLayerPosition(x, y)
+  if state.frame and state.layer then
+    local frameLayer = state.animation.framelayers[state.frame.id][state.layer.id]
+    frameLayer.x = frameLayer.x + x
+    frameLayer.y = frameLayer.y + y
   end
 end
 
-local function addNewFrame()
-  local frame = util.copy(state.currentFrame)
-  table.insert(state.frames, util.findIndex(state.frames, state.currentFrame) + 1, frame)
-  state.currentFrame = frame
+local function newFrame()
+  state.frame = state.animation:newFrame(state.frame)
+end
+
+local function setTab(tab)
+  state.tab = tab
 end
 
 local function newButton(parent, options)
   return ui.Button(parent, util.extend({theme = colors.button}, options))
+end
+
+local function changeLayerPriority(direction)
+  state.animation:swap('layers', state.layer, direction)
+end
+
+local function setEasingFunc(button)
+  state.frame.easing = button.easing
+end
+
+local function startRotation(x, y)
+  state.rotation.active = true
+  state.rotation.x = x
+  state.rotation.y = y
+  state.rotation.angle = state.animation.framelayers[state.frame.id][state.layer.id].angle
+end
+
+local function rotate(x, y, centerX, centerY)
+  local fl = state.animation.framelayers[state.frame.id][state.layer.id]
+  local start = math.atan2(state.rotation.y - centerY - fl.y, state.rotation.x - centerX - fl.x)
+  local now = math.atan2(y - centerY - fl.y, x - centerX - fl.x)
+  fl.angle = state.rotation.angle + (now - start)
 end
 
 -- ui layout
@@ -187,16 +93,15 @@ local play = ui.Area(state.ui, {w = 50, h = 50}):on('mousepressed', function()
 end)
 
 -- main tabs
-local function setTab(tab) state.menu = tab end
 local fileTab = newButton(header, {text = "File"}):on('mousepressed', setTab)
 local editTab = newButton(header, {text = "Edit"}):on('mousepressed', setTab)
 local layerTab = newButton(header, {text = "Layer"}):on('mousepressed', setTab)
 local frameTab = newButton(header, {text = "Frame"}):on('mousepressed', setTab)
 local mainTabs = {fileTab, editTab, layerTab, frameTab}
-state.menu = fileTab
+state.tab = fileTab
 
 -- file subtabs
-newButton(fileTab, {text = "Save"}):on('mousepressed', function() state.error = saveToDisk() end)
+newButton(fileTab, {text = "Save"}):on('mousepressed', function() state.error = state.animation:save() end)
 
 -- edit subtabs
 newButton(editTab, {text = 'Undo'})
@@ -205,50 +110,34 @@ newButton(editTab, {text = 'Redo'})
 -- TODO: layer subtabs - delete etc.
 
 -- frame subtabs
-function setEasing(tab) state.currentFrame.easing = tab.id end
 local easingButton = newButton(frameTab, {text = 'linear speed'}):on('mousepressed', function() state.showEasingPicker = true end)
 newButton(frameTab, {text = 'move left'}):on('mousepressed', function()
-  local i = util.findIndex(state.frames, state.currentFrame)
-  util.swapwrap(state.frames, i, i - 1)
+  state.animation:swap('frames', state.frame, -1)
 end)
 newButton(frameTab, {text = 'move right'}):on('mousepressed', function()
-  local i = util.findIndex(state.frames, state.currentFrame)
-  util.swapwrap(state.frames, i, i + 1)
+  state.animation:swap('frames', state.frame, 1)
 end)
-newButton(frameTab, {text = 'add'}):on('mousepressed', addNewFrame)
+newButton(frameTab, {text = 'add'}):on('mousepressed', newFrame)
 newButton(frameTab, {text = 'delete'}):on('mousepressed', function()
-  if #state.frames > 1 then
-    local i = util.findIndex(state.frames, state.currentFrame)
-    table.remove(state.frames, i)
-    state.currentFrame = state.frames[i] or state.frames[#state.frames]
-  end
+  state.frame = state.animation:tryDeleteFrame(state.frame) or state.frame
 end)
-
-local function changeLayerPriority(direction)
-  if #state.layers >= 2 then
-    local from = util.findIndex(state.layers, state.currentLayer)
-    local to = math.max(1, math.min(#state.layers, from + direction))
-    state.layers[from], state.layers[to] = state.layers[to], state.layers[from]
-  end
-end
 
 -- layer up/down buttons
 local layerUp = newButton(state.ui, {text = "up", align = "center"}):on('mousepressed', function() changeLayerPriority(-1) end)
 local layerDown = newButton(state.ui, {text = "down", align = "center"}):on('mousepressed', function() changeLayerPriority(1) end)
 
 -- change speed
-local faster = newButton(header, {text = "-"}):on('mousepressed', function() state.timePerFrame = state.timePerFrame - 0.02 end)
-local slower = newButton(header, {text = "+"}):on('mousepressed', function() state.timePerFrame = state.timePerFrame + 0.02 end)
+local faster = newButton(header, {text = "-"}):on('mousepressed', function() state.animation:adjustSpeed(-0.05) end)
+local slower = newButton(header, {text = "+"}):on('mousepressed', function() state.animation:adjustSpeed(0.05) end)
 local showSpeed = newButton(header)
 
 -- big button to add new frame
-local newFrameButton = ui.Rectangle(state.ui):on('mousepressed', addNewFrame)
+local newFrameButton = ui.Rectangle(state.ui):on('mousepressed', newFrame)
 
 -- error message
 local errorMessage = newButton(state.ui):on('mousepressed', function() state.error = nil end)
 
 local ew = ui.Rectangle(state.ui):on('mousepressed', function() state.showEasingPicker = false end)
-local function setEasingFunc(button) state.currentFrame.easing = button.easing end
 ui.Rectangle(ew, {easing = "linear"}):on('mousepressed', setEasingFunc)
 ui.Rectangle(ew, {easing = "easeIn"}):on('mousepressed', setEasingFunc)
 ui.Rectangle(ew, {easing = "easeInx2"}):on('mousepressed', setEasingFunc)
@@ -260,10 +149,10 @@ local draw = {}
 
 function draw.frame(f)
   if f then
-    for i = #state.layers, 1, -1 do
-      local layer = state.layers[i]
-      love.graphics.draw(layer.image, f:get(layer, 'x', 0), f:get(layer, 'y', 0), f:get(layer, 'orientation', 0), 1, 1,
-        layer.image:getWidth() / 2, layer.image:getHeight() / 2)
+    for i = #state.animation.layers, 1, -1 do
+      local layer = state.animation:reader(f.id, 'layers', state.animation.layers[i].id)
+      local w, h = state.animation.images[layer.id]:getDimensions()
+      love.graphics.draw(state.animation.images[layer.id], layer.x, layer.y, layer.angle, 1, 1, w / 2, h / 2)
     end
   end
 end
@@ -271,69 +160,67 @@ end
 function draw.exactFrame(f1, f2, elapsed, framepos)
   if f1 and f2 then
     local pos = util.easings[f1.easing](framepos)
-    for i = #state.layers, 1, -1 do
-      local layer = state.layers[i]
-      local x = f1:get(layer, 'x', 0) * (1 - pos) + f2:get(layer, 'x', 0) * pos
-      local y = f1:get(layer, 'y', 0) * (1 - pos) + f2:get(layer, 'y', 0) * pos
-      local start, distance = util.shortestRotation(f1:get(layer, 'orientation', 0), f2:get(layer, 'orientation', 0))
-      local orientation = start + distance * framepos
-      love.graphics.draw(layer.image, x, y, orientation, 1, 1, layer.image:getWidth() / 2, layer.image:getHeight() / 2)
+    for i = #state.animation.layers, 1, -1 do
+      local layer = state.animation.layers[i]
+      local f1l = state.animation:reader(f1.id, 'layers', layer.id)
+      local f2l = state.animation:reader(f2.id, 'layers', layer.id)
+      local x = f1l.x * (1 - pos) + f2l.x * pos
+      local y = f1l.y * (1 - pos) + f2l.y * pos
+      local start, distance = util.shortestRotation(f1l.angle, f2l.angle)
+      local angle = start + distance * framepos
+      local image = state.animation.images[layer.id]
+      love.graphics.draw(image, x, y, angle, 1, 1, image:getWidth() / 2, image:getHeight() / 2)
     end
   end
 end
 
 function draw.animationArea()
   -- draw background
-  animationArea:gotoPosition()
+  animationArea:moveTo()
   animationArea:draw({
     width = layout.window.width - layout.sidebar.width,
     height = layout.window.height - layout.header.height - layout.footer.height,
   })
 
-  animationArea:gotoPosition(animationArea.w / 2, animationArea.h / 2)
+  animationArea:moveTo(animationArea.w / 2, animationArea.h / 2)
 
   if state.playing then
-    local total = #state.frames * state.timePerFrame
-    local elapsed = util.remap(state.duration % total, 0, total, 1, #state.frames)
-    local f1 = state.frames[math.floor(elapsed)]
-    local f2 = state.frames[math.ceil(elapsed)]
+    local total = state.animation:duration()
+    local elapsed = util.remap(state.duration % total, 0, total, 1, #state.animation.frames)
+    local f1 = state.animation.frames[math.floor(elapsed)]
+    local f2 = state.animation.frames[math.ceil(elapsed)]
     draw.exactFrame(f1, f2, (state.duration % total) / total, elapsed % 1)
   else
-    local i = util.findIndex(state.frames, state.currentFrame)
+    local i = util.findIndex(state.animation.frames, state.frame)
 
     -- draw shadow of frame before this one
     love.graphics.setShader(util.solidColorShader(0, 0, 1, 0.15))
-    draw.frame(state.frames[i - 1])
+    draw.frame(state.animation.frames[i - 1])
 
     -- draw shadow of the frame after this one
     love.graphics.setShader(util.solidColorShader(0, 1, 0, 0.15))
-    draw.frame(state.frames[i + 1])
+    draw.frame(state.animation.frames[i + 1])
 
     -- and the current frame
     love.graphics.setShader()
-    draw.frame(state.frames[i])
+    draw.frame(state.animation.frames[i])
   end
 end
 
 function draw.sidebar()
-  sidebar:gotoPosition()
-  for i, layer in ipairs(state.layers) do
-    -- get or create button for this layer
-    if not sidebar.children[i] then
-      sidebar.children[i] = newButton(sidebar):on('mousepressed', function()
-        state.currentLayer = state.layers[i]
-      end)
-    end
-    button = sidebar.children[i]
+  sidebar:moveTo()
+  sidebar.children = {}
+  for i, layer in ipairs(state.animation.layers) do
+    local button = newButton(sidebar):on('mousepressed', function()
+      state.layer = state.animation.layers[i]
+    end)
 
-    -- draw it
-    button:draw({fontSize = 20, text = layer.fileData.filename, width = layout.sidebar.width, selected = (layer == state.currentLayer)})
-          :layout(ui.down)
+    button:draw({fontSize = 20, text = layer.name, width = layout.sidebar.width, selected = (layer == state.layer)}):layout(ui.down)
   end
 
   -- buttons to move layer up or down
   layerUp:draw({width = layout.sidebar.width / 2, align = "center"}):layout(ui.right)
-  layerDown:draw({width = layout.sidebar.width / 2}):layout(ui.right)
+  layerDown:draw({width = layout.sidebar.width / 2})
 end
 
 function draw.header()
@@ -341,26 +228,27 @@ function draw.header()
   local hr = 3 -- horizontal separator
 
   -- main tabs
-  header:gotoPosition(layout.sidebar.width, layout.header.height - h * 2 - hr)
+  header:moveTo(layout.sidebar.width, layout.header.height - h * 2 - hr)
   for _, tab in ipairs(mainTabs) do
-    tab:draw({fontSize = 22, align = "left", width = 100, height = h, selected = (tab == state.menu)}):layout(ui.right)
+    tab:draw({fontSize = 22, align = "left", width = 100, height = h, selected = (tab == state.tab)}):layout(ui.right)
   end
 
   -- subtabs
-  easingButton.text = state.currentFrame.easing
-  header:gotoPosition(layout.sidebar.width, layout.header.height - h)
-  for _, tab in ipairs(state.menu.children) do
-    tab:draw({height = h, selected = (tab.id == state.currentFrame.easing)}):layout(ui.right)
+  easingButton.text = state.frame.easing
+  header:moveTo(layout.sidebar.width, layout.header.height - h)
+  for _, tab in ipairs(state.tab.children) do
+    tab:draw({height = h}):layout(ui.right)
   end
 
   -- show total animation time
-  header:gotoPosition(layout.window.width - 160, layout.header.height - h * 2 - hr)
-  showSpeed:draw({width=100, height=30, text = 'Time: ' .. tostring(state.timePerFrame * #state.frames):sub(1, 4) .. 's'}):layout(ui.right)
+  header:moveTo(layout.window.width - 160, layout.header.height - h * 2 - hr)
+  local time = state.animation:duration()
+  showSpeed:draw({width=100, height=30, text = 'Time: ' .. tostring(time):sub(1, 4) .. 's'}):layout(ui.right)
   slower:draw({width=30, height=30, align = "center"}):layout(ui.right)
   faster:draw({width=30, height=30, align = "center"}):layout(ui.right)
 
   -- a pretty line/separator
-  header:gotoPosition()
+  header:moveTo()
   love.graphics.setColor(colors.button.selected.background)
   love.graphics.rectangle("fill", 0, layout.header.height - h - hr, layout.window.width, 3)
 end
@@ -370,7 +258,7 @@ function draw.footer()
 
   -- play/pause button
   local r = 25
-  footer:gotoPosition(layout.sidebar.width / 2, layout.footer.height / 2)
+  footer:moveTo(layout.sidebar.width / 2, layout.footer.height / 2)
   play.x, play.y = love.graphics.transformPoint(-r, -r)
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.circle("line", 0, 0, r)
@@ -383,21 +271,18 @@ function draw.footer()
   -- draw all the frames
   local pad = 5
   local size = layout.footer.height - pad * 2
-  footer:gotoPosition(layout.sidebar.width, pad)
-  for i, frame in ipairs(state.frames) do
+  footer:moveTo(layout.sidebar.width, pad)
+  footer.children = {}
+  for i, frame in ipairs(state.animation.frames) do
     -- border around the selected frame
-    if frame == state.currentFrame then
+    if frame == state.frame then
       love.graphics.setColor(colors.button.selected.background)
-      love.graphics.rectangle("fill", -2, -2, size+4, size+4)
+      love.graphics.rectangle("fill", -2, -2, size + 4, size + 4)
     end
 
-    -- get or create ui rectangle for frame
-    if not footer.children[i] then
-      footer.children[i] = ui.Rectangle(footer):on('mousepressed', function()
-        state.currentFrame = state.frames[i]
-      end)
-    end
-    local rect = footer.children[i]
+    local rect = ui.Rectangle(footer):on('mousepressed', function()
+      state.frame = frame
+    end)
 
     -- draw white background
     rect:draw({width = size, height = size, background = {1, 1, 1, 1}})
@@ -415,13 +300,14 @@ function draw.footer()
 
   if state.playing then
     -- line for current animation time/location
-    footer:gotoPosition(layout.sidebar.width)
+    footer:moveTo(layout.sidebar.width)
     love.graphics.setColor(1, 0, 0, 1)
-    love.graphics.rectangle("fill", ((size + pad) * #state.frames - pad * 2) * elapsedPercentage(), 0, 2, size + pad * 2)
+    local elapsed = (state.duration % state.animation:duration()) % state.animation:duration()
+    love.graphics.rectangle("fill", ((size + pad) * #state.animation.frames - pad * 2) * elapsed, 0, 2, size + pad * 2)
   end
 
   -- add new frame button
-  footer:gotoPosition(layout.window.width - size / 2 - pad, pad)
+  footer:moveTo(layout.window.width - size / 2 - pad, pad)
   newFrameButton:draw({width = size/2, height = size/2, background = {0, 0, 0, 0.8}})
   love.graphics.setLineWidth(3)
   love.graphics.setColor(1, 1, 1, 1)
@@ -435,7 +321,7 @@ function draw.easingPicker()
   ew:draw({width = layout.window.width, height = layout.window.height, background = {0, 0, 0, 0.6}})
 
   local wpad = 50
-  ew:gotoPosition(wpad, wpad)
+  ew:moveTo(wpad, wpad)
 
   local w, h = 200, 150
   local pad = 20
@@ -470,9 +356,13 @@ function draw.easingPicker()
   end
 end
 
-function love.load()
+function love.load(arg)
   love.graphics.setBackgroundColor(colors.background)
   love.window.setMode(layout.window.width, layout.window.height, {resizable = true, minwidth = 800, minheight = 600})
+
+  for _, filename in ipairs(arg) do
+    state.layer = state.animation:newLayer(io.open(filename, 'rb'):read('*a'), filename)
+  end
 end
 
 function love.draw()
@@ -489,62 +379,69 @@ end
 function love.update(dt)
   state.duration = state.duration + dt
   -- TODO: loop or no loop?
-  if state.duration > state.timePerFrame * #state.frames then
-    state.playing = false
-  end
+  -- if state.duration > state.timePerFrame * #state.frames then
+  --   state.playing = false
+  -- end
   -- TODO: limit framerate when not playing animation?
 end
 
 function love.filedropped(file)
   -- accept new images when dropped
-  local rawData = file:read()
-  file:seek(0)
-  local imageData = love.image.newImageData(file)
-  local fileData = util.getFileInfo(file:getFilename())
-  local layer = Layer(imageData, rawData, fileData)
-  table.insert(state.layers, layer)
-  state.currentLayer = state.currentLayer or layer
+  state.layer = state.animation:newLayer(file:read(), file:getFilename())
 end
 
+local mountpoints = {}
 function love.directorydropped(dir)
-  -- load previously saved project
-  love.filesystem.mount(dir, "loading")
-  state.error = loadFromDisk("loading")
-  print(state.error)
-  love.filesystem.unmount("loading")
+  -- love2d bug? we can't mount a directory for a second time after previously mounting and unmounting
+  -- so we'll mount it for the first time only and never unmount
+  if not mountpoints[dir] then
+    mountpoints[dir] = "animation-love-loading-" .. love.math.random(2^32)
+    love.filesystem.mount(dir, mountpoints[dir])
+  end
+
+  local err, animation = Animation.load(mountpoints[dir])
+  if err then
+    state.error = err
+    error(err)
+  else
+    state.animation = animation
+    state.frame = animation.frames[1]
+    state.layer = animation.layers[1]
+  end
 end
 
 function love.mousepressed(x, y, button)
   state.ui:handleEvent('mousepressed', {x = x, y = y})
 
-  if button == 2 and state.currentLayer then
-    local ax, ay = animationArea:getCenter()
-    state.currentFrame:startRotation(state.currentLayer, x - ax, y - ay)
+  if button == 2 and state.layer then
+    startRotation(x, y)
+  end
+end
+
+function love.mousereleased(x, y, button)
+  if button == 2 then
+    state.rotation.active = false
   end
 end
 
 function love.mousemoved(x, y, dx, dy, istouch)
   state.ui:setHoverState(x, y)
 
-  local frame = state.currentFrame
-  local layer = state.currentLayer
-  if layer and love.mouse.isDown(1) then
+  if state.layer and love.mouse.isDown(1) then
     -- drag layer around with left mouse button
-    frame:set(layer, 'x', frame:get(layer, 'x', 0) + dx)
-    frame:set(layer, 'y', frame:get(layer, 'y', 0) + dy)
-  elseif layer and love.mouse.isDown(2) then
+    adjustLayerPosition(dx, dy)
+  elseif state.layer and state.rotation.active and love.mouse.isDown(2) then
     -- rotate layer with right mouse button
-    local ax, ay = animationArea:getCenter()
-    frame:rotate(state.currentLayer, x - ax, y - ay)
+    rotate(x, y, animationArea:getCenter())
   end
 end
 
 function love.keypressed(key, keycode, isrepeat)
   -- adjust layer position with arrow keys
-  if key == "left"  then adjustLayerPos(-1, 0) end
-  if key == "right" then adjustLayerPos(1, 0)  end
-  if key == "up"    then adjustLayerPos(0, -1) end
-  if key == "down"  then adjustLayerPos(0, 1)  end
+  if key == "left"  then adjustLayerPosition(-1, 0) end
+  if key == "right" then adjustLayerPosition(1, 0)  end
+  if key == "up"    then adjustLayerPosition(0, -1) end
+  if key == "down"  then adjustLayerPosition(0, 1)  end
 end
 
 function love.resize(w, h)

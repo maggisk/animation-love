@@ -37,6 +37,12 @@ function module.remap(value, minValue, maxValue, minReturn, maxReturn)
   return minReturn + (maxReturn - minReturn) * ((value - minValue) / (maxValue - minValue))
 end
 
+function module.count(table)
+  local c = 0
+  for _ in pairs(table) do c = c + 1 end
+  return c
+end
+
 function module.copy(orig)
   local copy = {}
   if getmetatable(orig) then
