@@ -1,3 +1,4 @@
+local Object = require "classic"
 local util = require "util"
 local playback = require "playback"
 
@@ -10,6 +11,8 @@ local function locate(array, id)
   assert(false)
 end
 
+-- decode is in playback.lua because we want that to be a standalone file with
+-- no dependecies and nothing irrelevant to playback
 local function encode(obj, buf, indent)
   local t = type(obj)
   if t == "table" then
@@ -28,7 +31,7 @@ local function encode(obj, buf, indent)
   end
 end
 
-local Animation = util.Object:extend()
+local Animation = Object:extend()
 function Animation:new(state)
   self.images = {} -- love image objects
   self.blobs = {}  -- image binary strings
@@ -37,7 +40,7 @@ function Animation:new(state)
   self.state = state or {
     maxId = 1,
     layers = {},
-    frames = {{id = 1, easing = 'linear', time = 0.3}},
+    frames = {{id = 1, easing = 'linear', duration = 0.3}},
     joints = {},
     framelayers = {{}},
     framejoints = {{}},
@@ -45,6 +48,14 @@ function Animation:new(state)
 
   -- make it accessible on the animation object without using .state
   util.extend(self, self.state)
+end
+
+function Animation:copy()
+  local animation = Animation(util.copy(self.state))
+  animation.images = util.extend(self.images)
+  animation.blobs = util.extend(self.blobs)
+  animation.savedir = self.savedir
+  return animation
 end
 
 function Animation:nextId()
@@ -73,7 +84,7 @@ end
 
 function Animation:newFrame(source)
   source = source or self.state.frames[#self.state.frames]
-  frame = util.extend({}, source)
+  local frame = util.extend({}, source)
   frame.id = self:nextId()
   table.insert(self.state.frames, frame)
 
@@ -90,14 +101,26 @@ function Animation:newFrame(source)
   return frame
 end
 
+function Animation:deleteLayer(layer)
+  local i = util.indexOf(self.state.layers, layer)
+  assert(i)
+  table.remove(self.state.layers, i)
+  for _, k in ipairs({'framelayers', 'framejoints'}) do
+    self.state[k][layer.id] = nil
+  end
+  return self.state.layers[i] or self.state.layers[#self.state.layers]
+end
+
 function Animation:tryDeleteFrame(frame)
   if #self.state.frames > 1 then
-    local i = util.findIndex(self.state.frames, frame)
+    local i = util.indexOf(self.state.frames, frame)
+    assert(i)
     table.remove(self.state.frames, i)
     self.state.framelayers[frame.id] = nil
     self.state.framejoints[frame.id] = nil
     return self.state.frames[i] or self.state.frames[#self.state.frames]
   end
+  return frame
 end
 
 function Animation:reader(frameId, type, typeId)
@@ -121,7 +144,9 @@ function Animation:duration()
 end
 
 function Animation:swap(type, item, direction)
-  local i = util.findIndex(self.state[type], item)
+  assert(self.state[type])
+  local i = util.indexOf(self.state[type], item)
+  assert(i)
   util.swapwrap(self.state[type], i, i + direction)
 end
 
@@ -138,23 +163,23 @@ function Animation:encode()
 end
 
 function Animation:save(savedir)
-  savedir = savedir or "animation-love-" .. love.math.random(10000)
-  if love.filesystem.getInfo(savedir) then
-    for _, f in ipairs(love.filesystem.getDirectoryItems(savedir)) do
-      love.filesystem.remove(savedir .. '/' .. f)
+  self.savedir = self.savedir or "animation-love-save-" .. love.math.random(2^32)
+  if love.filesystem.getInfo(self.savedir) then
+    for _, f in ipairs(love.filesystem.getDirectoryItems(self.savedir)) do
+      love.filesystem.remove(self.savedir .. '/' .. f)
     end
   end
-  love.filesystem.createDirectory(savedir)
+  love.filesystem.createDirectory(self.savedir)
 
-  local success, message = love.filesystem.write(savedir .. "/animation.txt", self:encode())
+  local success, message = love.filesystem.write(self.savedir .. "/animation.txt", self:encode())
   if not success then return message end
 
   for _, layer in ipairs(self.layers) do
-    local success, message = love.filesystem.write(string.format("%s/%s.%s", savedir, layer.name, layer.ext), self.blobs[layer.id])
+    local success, message = love.filesystem.write(string.format("%s/%s.%s", self.savedir, layer.name, layer.ext), self.blobs[layer.id])
     if not success then return message end
   end
 
-  love.system.openURL("file://" .. love.filesystem.getSaveDirectory() .. "/" .. savedir)
+  love.system.openURL("file://" .. love.filesystem.getSaveDirectory() .. "/" .. self.savedir)
 end
 
 function Animation.load(savedir)
@@ -162,6 +187,7 @@ function Animation.load(savedir)
   if not s then return message, nil end
 
   local animation = Animation(playback.decode(util.matchall(s, "([^\r\n]+)")))
+  animation.savedir = savedir
 
   for i, layer in ipairs(animation.layers) do
     local path = string.format("%s/%s.%s", savedir, layer.name, layer.ext)

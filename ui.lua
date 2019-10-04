@@ -1,4 +1,54 @@
 local util = require "util"
+local Object = require "classic"
+local playback = require "playback"
+
+local colors = {
+  background = {0.157, 0.173, 0.204, 1},
+  button = {
+    font = {1, 1, 1, 1},
+    background = {0, 0, 0, 0},
+    selected = {background = {78.6/255, 146.2/255, 228.8/255, 1}},
+    hovering = {background = {73.6/255, 85.8/255, 100.6/255, 1}},
+  },
+  currentFrameBorder = {78.6/255, 146.2/255, 228.8/255, 1},
+}
+
+local dir = {
+  left = {x = -1, y = 0},
+  right = {x = 1, y = 0},
+  up = {x = 0, y = -1},
+  down = {x = 0, y = 1},
+}
+
+local function whereami()
+  return love.graphics.transformPoint(0, 0)
+end
+
+local function move(m)
+  if m.to then
+    local x, y = whereami()
+    love.graphics.origin()
+    love.graphics.translate(m.to.x or x, m.to.y or y)
+  end
+  if m.by then
+    local x, y = whereami()
+    love.graphics.translate(m.by.x or 0, m.by.y or 0)
+  end
+end
+
+local function matches(table, attr)
+  for k, v in pairs(attr) do
+    if table[k] ~= v then return false end
+  end
+  return true
+end
+
+local function background(color, ...)
+  local r, g, b, a = love.graphics.getColor()
+  love.graphics.setColor(color)
+  love.graphics.rectangle("fill", ...)
+  love.graphics.setColor(r, g, b, a)
+end
 
 local Text = {}
 function Text.getDimensions(text, size)
@@ -12,154 +62,508 @@ function Text.print(text, size, x, y)
   love.graphics.print(text, x or 0, y or 0)
 end
 
-
-local Area = util.Object:extend()
-function Area:new(parent, options)
-  self.parent = parent
-  self.x, self.y = 0, 0
-  self.w, self.h = 0, 0
-  self.theme = {}
-  util.extend(self, options)
-  self.children = {}
+local Element = Object:extend()
+function Element:new(attr, ...)
+  self.attr = attr or {}
+  self.children = {...}
   self.events = {}
-  if parent then
-    parent.children[#parent.children + 1] = self
+  self.context = {}
+end
+
+function Element:add(...)
+  for _, child in ipairs({...}) do
+    child.context = self.context
+    table.insert(self.children, child)
+  end
+  return self.children[#self.children]
+end
+
+function Element:getOrCreate(query, create)
+  for _, e in ipairs(self:query(query)) do return e end
+  return self:add(create())
+end
+
+function Element:callback(eventName, payload)
+  return function()
+    self.context.dispatch(eventName, payload)
   end
 end
 
-function Area:updateAll(props)
-  util.extend(self, props)
+function Element:iter()
+  local r, h, t, q = nil, 1, 1, {self}
+  return function()
+    if h <= t then
+      for _, child in ipairs(q[h].children) do
+        t = t + 1
+        q[t] = child
+      end
+      r, q[h] = q[h], nil
+      h = h + 1
+      return r
+    end
+  end
+end
+
+function Element:query(attr)
+  local r = {}
+  for node in self:iter() do
+    if matches(node.attr, attr) then
+      r[#r+1] = node
+    end
+  end
+  return r
+end
+
+function Element:getCenter()
+  return (self.width or self.attr.width) / 2, (self.height or self.attr.height) / 2
+end
+
+function Element:on(name, fn)
+  assert(name and fn)
+  self.events[name] = self.events[name] or {}
+  table.insert(self.events[name], fn)
+  return self
+end
+
+function Element:removeListener(name, fn)
+  local i = util.indexOf(self.events[name] or {}, fn)
+  assert(i)
+  table.remove(self.events[name], i)
+end
+
+function Element:trigger(name, e)
+  if self.events[name] then
+    for _, fn in ipairs(self.events[name]) do
+      if fn(self, e) == false then
+        return false
+      end
+    end
+  end
+end
+
+function Element:broadcast(name, e)
+  for node in self:iter() do node:trigger(name, e) end
+end
+
+function Element:_process(obj, ...)
+  for i = #self.children, 1, -1 do
+    if self.children[i]:_process(obj, ...) == false then
+      return false
+    end
+  end
+  for _, e in ipairs({...}) do
+    if e.guard(self) then
+      if self:trigger(e.name, obj) == false then
+        return false
+      end
+    end
+  end
+end
+
+function Element:processEvent(name, e)
+  local function guard(node) return node.visible end
+  return self:_process(e, {name = name, guard = guard})
+end
+
+function Element:processMouseEvent(name, e)
+  self:_process(e,
+    {name = name, guard = function(node) return node.visible and node:contains(e.x, e.y) end},
+    {name = 'window' .. name, guard = function(node) return node.visible end}
+  )
+end
+
+function Element:contains(x, y)
+  if not self.x or not self.y or not self.width or not self.height then return true end -- dummy wrapper
+  return (self.x <= x and x <= self.x + self.width and self.y <= y and y <= self.y + self.height)
+end
+
+function Element:render(attr, layout)
+  self.visible = true 
   for _, child in ipairs(self.children) do
-    child:updateAll(props)
+    -- set visibility flag so we know what elements should receive mouse and keyboard events
+    child.visible = false
+    -- forward context object to child
+    child.context = self.context
   end
+
+  -- extend attributes with those passed to render
+  util.extend(self.attr, attr)
+
+  -- store coordinates and size so we know where on the screen this element is
+  self.x, self.y = whereami()
+  self.width  = self.attr.width  or self.context.window.width  - self.x - (self.attr.right or 0)
+  self.height = self.attr.height or self.context.window.height - self.y - (self.attr.bottom or 0)
+
+  love.graphics.push()
+  self:draw()
+  love.graphics.pop()
+
+  -- move rendering coordinates for next element
+  if layout then self:layout(layout) end
 end
 
-function Area:getCenter()
-  return self.x + self.w / 2, self.y + self.h / 2
+function Element:layout(dir)
+  love.graphics.translate(dir.x * self.width, dir.y * self.height)
 end
 
-function Area:moveTo(x, y)
-  love.graphics.origin()
-  love.graphics.translate(self.x + (x or 0), self.y + (y or 0))
+function Element:draw()
 end
 
-function Area:getTheme(o, ...)
-  local theme = util.extend({}, o.theme)
-  for _, k in ipairs({...}) do
-    if o[k] then
-      util.extend(theme, self.theme[k])
+local Button = Element:extend()
+function Button:new(attr)
+  Element.new(self, util.extend({
+    paddingX = 10,
+    fontsize = 20,
+    theme = colors.button,
+  }, attr))
+
+  if not self.attr.height and not self.attr.paddingY then
+    self.attr.paddingY = 5
+  end
+
+  self:on('windowmousemoved', self.onMouseMoved)
+end
+
+function Button:onMouseMoved(e)
+  self.attr.hovering = self:contains(e.x, e.y)
+end
+
+function Button:getTheme()
+  local theme = self.attr.theme
+  for _, k in ipairs({'hovering', 'selected'}) do
+    if self.attr[k] == true and self.attr.theme[k] then
+      theme = util.extend({}, theme, self.attr.theme[k])
     end
   end
   return theme
 end
 
-function Area:contains(x, y)
-  return self.x <= x and x <= self.x + self.w and self.y < y and y < self.y + self.h
+function Button:draw()
+  local theme = self:getTheme()
+  local tw, th = Text.getDimensions(self.attr.text, self.attr.fontsize)
+  self.width = self.attr.width or tw + (self.attr.paddingX or 0) * 2
+  self.height = self.attr.height or th + (self.attr.paddingY or 0) * 2
+  background(theme.background, 0, 0, self.width, self.height)
+  local x = self.width / 2 - tw / 2
+  local y = self.height / 2 - th / 2
+  if self.attr.align == "left" then
+    x = self.attr.paddingX
+  elseif self.attr.align == "right" then
+    x = self.width - self.paddingX - th
+  end
+  love.graphics.setColor(theme.font)
+  Text.print(self.attr.text, self.attr.fontsize, x, y)
 end
 
-function Area:layout(dir, x, y)
-  love.graphics.translate(self.w * dir.x + (x or 0), self.h * dir.y + (y or 0))
+local Header = Element:extend()
+function Header:new(attr)
+  self.tab = 'file'
+
+  local function setTab(tab) self.tab = tab.attr.id end
+
+  Element.new(self, attr,
+    -- main tabs
+    Button({id = 'file', type = 'main', text = "File"}):on('mousepressed', setTab),
+    Button({id = 'edit', type = 'main', text = "Edit"}):on('mousepressed', setTab),
+    Button({id = 'layer', type = 'main', text = "Layer"}):on('mousepressed', setTab),
+    Button({id = 'frame', type = 'main', text = "Frame"}):on('mousepressed', setTab),
+
+    -- file subtabs
+    Button({text = "New", below = 'file'}):on('mousepressed', self:callback('NEW_PROJECT')),
+    Button({text = "Save", below = 'file'}):on('mousepressed', self:callback('SAVE')),
+
+    -- edit subtabs
+    Button({text = 'Undo', below = 'edit'}):on('mousepressed', self:callback('UNDO')),
+    Button({text = 'Redo', below = 'edit'}):on('mousepressed', self:callback('REDO')),
+
+    -- layer subtabs
+    Button({text = 'Delete', below = 'layer'}):on('mousepressed', self:callback('DELETE_LAYER')),
+
+    -- frame subtabs
+    Button({below = 'frame', id = 'easing'}):on('mousepressed', self:callback('BROADCAST', {event = 'easingtoggle'})),
+    Button({below = 'frame', text = 'move left'}):on('mousepressed', self:callback('MOVE_FRAME', -1)),
+    Button({below = 'frame', text = 'move right'}):on('mousepressed', self:callback('MOVE_FRAME', 1)),
+    Button({below = 'frame', text = 'add'}):on('mousepressed', self:callback('NEW_FRAME')),
+    Button({below = 'frame', text = 'delete'}):on('mousepressed', self:callback('DELETE_FRAME')),
+
+    -- buttons to move layers up/down
+    Button({type = 'movelayer', text = "up"}):on('mousepressed', self:callback('CHANGE_LAYER_PRIORITY', -1)),
+    Button({type = 'movelayer', text = "down"}):on('mousepressed', self:callback('CHANGE_LAYER_PRIORITY', 1))
+  )
 end
 
-function Area:on(name, fn)
-  assert(name and fn)
-  self.events[name] = fn
-  return self
-end
+function Header:draw()
+  self:query({id = 'easing'})[1].attr.text = self.context.state.frame.easing
+  local h = 30 -- tab height
 
-function Area:trigger(name, ...)
-  assert(name)
-  if self.events[name] then
-    return self.events[name](self, ...)
+  -- move layer button far left
+  move({to = {y = self.attr.height - h}})
+  for _, button in ipairs(self:query({type = 'movelayer'})) do
+    button:render({fontsize = 16}, dir.right)
+  end
+
+  -- subtabs first
+  move({to = {x = self.attr.left}})
+  for _, tab in ipairs(self:query({below = self.tab})) do
+    tab:render({height = h}, dir.right)
+  end
+
+  -- pretty line separator
+  move({to = {x = self.attr.left}, by = {y = -3}})
+  background(colors.button.selected.background, -self.attr.left, 0, self.width, 3)
+
+  -- main tabs
+  move({by = {y = -h}})
+  for _, tab in ipairs(self:query({type = 'main'})) do
+    tab:render({selected = (self.tab == tab.attr.id), align = "left", height = h, fontsize = 28, width = 100}, dir.right)
   end
 end
 
-function Area:setHoverState(x, y)
-  self.hover = self:contains(x, y)
-  for _, child in ipairs(self.children) do
-    child:setHoverState(x, y)
+local Sidebar = Element:extend()
+function Sidebar:new(attr)
+  Element.new(self, attr)
+end
+
+function Sidebar:draw()
+  for _, layer in ipairs(self.context.state.animation.layers) do
+    local button = self:getOrCreate({id = layer.id}, function()
+      return Button({id = layer.id}):on('mousepressed', self:callback('SELECT_LAYER', layer.id))
+    end)
+    button:render({text = layer.name, width = self.attr.width, selected = (layer.id == self.context.state.layer.id)}, dir.down)
   end
 end
 
-function Area:handleEvent(name, e)
-  -- Area can't be invislble but child classes can
-  if self.visible or getmetatable(self) == Area then
-    for _, child in ipairs(self.children) do
-      if child:handleEvent(name, e) == false then
-        -- prevent parent objects from getting event notification by returning false in callback
-        return
+local Frame = Element:extend()
+function Frame:draw()
+  background(self.attr.background or {1, 1, 1, 1}, 0, 0, self.attr.width, self.attr.height)
+
+  local function hideOverflow() love.graphics.rectangle("fill", 0, 0, self.attr.width, self.attr.height) end
+  love.graphics.stencil(hideOverflow, "replace", 1)
+
+  local x, y = self:getCenter()
+  move({by = {x = x, y = y}})
+  love.graphics.scale(self.attr.scale or 1)
+
+  local player = self.attr.player
+  if not player then
+    player = self.context.state.player
+    player:setFrame(self.attr.frame)
+  end
+
+  love.graphics.setStencilTest("equal", 1)
+  love.graphics.setShader(self.attr.shader)
+  player:draw()
+  love.graphics.setShader()
+  love.graphics.setStencilTest()
+end
+
+local AnimationArea = Element:extend()
+function AnimationArea:new(attr)
+  Element.new(self, attr)
+  self.frame = self:add(Frame())
+
+  self:on('mousepressed', self.onMousePressed)
+  self:on('mousemoved', self.onMouseMoved)
+  self:on('windowmousereleased', self.onWindowMouseReleased)
+  self:on('windowmousemoved', self.onWindowMouseMoved)
+  self:on('toggleplay', self.onTogglePlay)
+end
+
+function AnimationArea:onMousePressed(e)
+  if e.button == 2 and self.context.state.frame then
+    self.rotation = {x = e.x, y = e.y}
+    self.rotation.angle = self.context.state.animation.framelayers[self.context.state.frame.id][self.context.state.layer.id].angle
+  end
+end
+
+function AnimationArea:onWindowMouseReleased(e)
+  if e.button == 2 then
+    self.rotation = nil
+  end
+end
+
+function AnimationArea:onMouseMoved(e)
+  if love.mouse.isDown(1) then
+    for _, layer in ipairs(self.context.state.animation.layers) do
+      if love.keyboard.isDown('lctrl') or layer == self.context.state.layer then
+        self.context.dispatch('MOVE_LAYER', layer, e)
       end
     end
-    if self:contains(e.x, e.y) then
-      return self:trigger(name)
+  end
+end
+
+function AnimationArea:onWindowMouseMoved(e)
+  if self.rotation then
+    local x, y = self:getCenter()
+    local center = {x = self.x + x, y = self.y + y}
+    self.context.dispatch('ROTATE_LAYER', {start = self.rotation, now = e, center = center})
+  end
+end
+
+function AnimationArea:onTogglePlay()
+  self.context.playing = not self.context.playing
+  if self.context.playing then
+    local animation = self.context.state.animation
+    self.player = playback.Animation(animation.state, animation.images)
+    self.player.loop = true
+    self:on('tick', self.tick)
+  else
+    self:removeListener('tick', self.tick)
+    self.player = false
+  end
+end
+
+function AnimationArea:tick(dt)
+  self.player:update(dt)
+end
+
+function AnimationArea:draw()
+  background({1, 1, 1, 1}, 0, 0, self.width, self.height)
+  local attr = {width = self.width, height = self.height, player = self.player, background = {0, 0, 0, 0}}
+
+  if attr.player then
+    self.frame:render(attr)
+  else
+    local frame = util.indexOf(self.context.state.animation.frames, self.context.state.frame)
+    self:drawWithShader(attr, frame - 1, util.solidColorShader(0, 0, 0, 0.12))
+    self:drawWithShader(attr, frame + 1, util.solidColorShader(1, 1, 0, 0.2))
+    self:drawWithShader(attr, frame)
+  end
+end
+
+function AnimationArea:drawWithShader(attr, frame, shader)
+  if self.context.state.animation.frames[frame] then
+    self.frame.attr.frame = frame
+    self.frame.attr.shader = shader
+    self.frame:render(attr)
+  end
+end
+
+local PlayButton = Element:extend()
+function PlayButton:new(attr)
+  Element.new(self, attr)
+  self:on('mousepressed', self.onMousePressed)
+end
+
+function PlayButton:onMousePressed(e)
+  local x, y = self:getCenter()
+  if (self.x + x - e.x)^2 + (self.y + y - e.y)^2 <= self.r^2 then
+    self.context.dispatch('BROADCAST', {event = 'toggleplay'})
+  end
+end
+
+function PlayButton:draw()
+  self.r = self.height / 4
+  local x, y = self:getCenter()
+  move({by = {x = x, y = y}})
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.circle("line", 0, 0, self.r)
+  if self.context.playing then
+    love.graphics.rectangle("fill", -10, -10, 20, 20)
+  else
+    love.graphics.polygon("fill", -7, -10, -7, 10, 13, 0)
+  end
+end
+
+local Frames = Element:extend()
+function Frames:new(attr)
+  Element.new(self, attr)
+end
+
+function Frames:draw()
+  local pad = 5
+  move({by = {y = pad}})
+  local framesize = self.height - pad * 2
+  for i, frame in ipairs(self.context.state.animation.frames) do
+    move({by = {x = pad}})
+    local elem = self:getOrCreate({id = frame.id}, function()
+      return Frame({id = frame.id, scale = 0.2}):on('mousepressed', self:callback('SELECT_FRAME', frame.id))
+    end)
+    if frame == self.context.state.frame then
+      background(colors.currentFrameBorder, -pad, -pad, framesize + pad * 2, framesize + pad * 2)
+    end
+    elem:render({width = framesize, height = framesize, frame = i}, dir.right)
+  end
+end
+
+local Easing = Element:extend()
+function Easing:new(attr)
+  Element.new(self, attr)
+  self.button = self:add(Button({align = "left", text = self.attr.name}))
+end
+
+function Easing:draw()
+  background(colors.background, 0, 0, self.attr.width, self.attr.height)
+  self.button:render({width = self.attr.width, height = self.attr.height})
+  local bw = 120 -- button space
+  local lw = self.attr.width - bw - 10 -- easing line width
+  move({by = {x = bw, y = self.attr.height / 2}})
+  love.graphics.setColor(colors.button.selected.background)
+  love.graphics.line(0, 0, lw, 0)
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.circle("fill", lw * playback.easing[self.attr.name](self.attr.time), 0, 4)
+  self.height = self.button.height
+end
+
+local EasingPicker = Element:extend()
+function EasingPicker:new(attr)
+  Element.new(self, attr)
+  self.isOpen = false
+  self.names = util.keys(playback.easing)
+  table.sort(self.names)
+
+  for _, name in ipairs(self.names) do
+    self:add(Easing({name = name})):on('mousepressed', self:callback('SELECT_EASING', name))
+  end
+
+  self:on('easingtoggle', self.toggle)
+  self:on('windowmousepressed', self.toggle)
+end
+
+function EasingPicker:toggle()
+  self.isOpen = not self.isOpen
+  self.start = self.context.state.duration
+  return false
+end
+
+function EasingPicker:draw()
+  self.visible = self.isOpen
+  if not self.isOpen then return end
+  move({to = {x = self.attr.left, y = self.attr.top}})
+
+  self.x, self.y = whereami()
+  self.width = 400
+  self.height = 30 * #self.children
+
+  local time = (self.context.state.duration - self.start) % 2 / 2
+  for _, child in ipairs(self.children) do
+    child:render({time = time, width = self.width, height = 30}, dir.down)
+  end
+end
+
+local Window = Element:extend()
+function Window:new(attr)
+  Element.new(self, attr,
+    Header({height = 100, left = 200}),
+    Sidebar({width = 200, bottom = 100}),
+    AnimationArea({bottom = 100}),
+    PlayButton({width = 200}),
+    Frames(),
+    EasingPicker({left = 200, top = 100})
+  )
+end
+
+function Window:draw()
+  background(colors.background, 0, 0, self.width, self.height)
+
+  for _, child in ipairs(self.children) do
+    child:render({}, dir.right)
+    if child.x + child.width >= self.width then
+      move({to = {x = 0}, by = {y = child.height}})
     end
   end
-end
-
-local Rectangle = Area:extend()
-function Rectangle:draw(o)
-  self.visible = true
-  o = util.extend({}, self, o)
-  if o.width  then self.w = o.width  end
-  if o.height then self.h = o.height end
-  local background = (o and o.background) or self.background
-  if background then
-    love.graphics.setColor(background)
-    love.graphics.rectangle("fill", 0, 0, self.w, self.h, o.radius)
-  end
-  self.x, self.y = love.graphics.transformPoint(0, 0)
-end
-
-local Button = Area:extend()
-function Button:new(parent, options)
-  assert(self and parent)
-  Area.new(self, parent, options)
-  self.paddingX = 10
-  self.paddingY = 5
-  self.width = "auto"
-  self.height = "auto"
-  self.fontSize = 18
-  self.align = "left"
-  util.extend(self, options)
-end
-
-function Button:draw(o)
-  self.visible = true
-  o = util.extend({}, self, o)
-
-  local tw, th = Text.getDimensions(o.text or "", o.fontSize)
-  local w, h = o.width, o.height
-
-  -- decide dimensions of auto-sized button
-  if w == "auto" then w = tw + o.paddingX * 2 end
-  if h == "auto" then h = th + o.paddingY * 2 end
-
-  -- save position and size for layouting
-  self.x, self.y = love.graphics.transformPoint(0, 0)
-  self.w, self.h = w, h
-
-  local theme = self:getTheme(o, "hover", "selected")
-  love.graphics.setColor(theme.background)
-  love.graphics.rectangle("fill", 0, 0, w, h)
-
-  if o.text then
-    local x = w / 2 - tw / 2
-    local y = h / 2 - th / 2
-    if o.align == "left" then x = o.paddingX end
-    love.graphics.setColor(theme.font)
-    Text.print(o.text, o.fontSize, x, y)
-  end
-
-  return self
 end
 
 return {
-  Area = Area,
-  Rectangle = Rectangle,
-  Text = Text,
-  Button = Button,
-  left = {x = -1, y = 0},
-  right = {x = 1, y = 0},
-  up = {x = 0, y = -1},
-  down = {x = 0, y = 1},
+  Window = Window,
 }
