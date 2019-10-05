@@ -8,7 +8,9 @@ local playback = require "playback"
 -- global state
 local state = {}
 state.duration = 0
-state.zoom = 1 -- TODO
+state.zoom = 1
+state.offsetX = 0
+state.offsetY = 0
 
 -- root ui object, initialized in love.load
 local window
@@ -42,6 +44,14 @@ function history.set(animation)
   state.layer = state.animation.layers[1]
 end
 
+local function scale(point)
+  return point * (1 / state.zoom)
+end
+
+local function transformPoint(x, y)
+  return scale(x - state.offsetX), scale(y - state.offsetY)
+end
+
 -- ui event handlers
 local eventhandler = {}
 
@@ -66,11 +76,25 @@ function eventhandler.REDO()
   history.redo()
 end
 
+function eventhandler.ZOOM(diff)
+  for i = 1, diff  do state.zoom = state.zoom * (10/9) end
+  for i = 1, -diff do state.zoom = state.zoom * (9/10) end
+end
+
+function eventhandler.MOVE_CENTER(e)
+  state.offsetX = state.offsetX + e.x
+  state.offsetY = state.offsetY + e.y
+end
+
+local moveLayerEventId = -1
 function eventhandler.MOVE_LAYER(layer, e)
-  -- TODO: push to history when movement starts
+  if e.id and e.id ~= moveLayerEventId then
+    moveLayerEventId = e.id
+    history.push()
+  end
   layer = state.animation.framelayers[state.frame.id][layer.id]
-  layer.x = layer.x + e.dx
-  layer.y = layer.y + e.dy
+  layer.x = layer.x + scale(e.x)
+  layer.y = layer.y + scale(e.y)
 end
 
 function eventhandler.SELECT_LAYER(id)
@@ -96,11 +120,15 @@ function eventhandler.CHANGE_LAYER_PRIORITY(diff)
   end
 end
 
+local rotateLayerEventId = -1
 function eventhandler.ROTATE_LAYER(r)
-  -- TODO: push to history when rotation starts
+  if r.id and r.id ~= rotateLayerEventId then
+    rotateLayerEventId = r.id
+    history.push()
+  end
   local layer = state.animation.framelayers[state.frame.id][state.layer.id]
-  local mouseStartAngle = math.atan2(r.start.y - r.center.y - layer.y, r.start.x - r.center.x - layer.x)
-  local mouseCurrentAngle = math.atan2(r.now.y - r.center.y - layer.y, r.now.x - r.center.x - layer.x)
+  local mouseStartAngle = math.atan2(scale(r.start.y - r.center.y) - layer.y, scale(r.start.x - r.center.x) - layer.x)
+  local mouseCurrentAngle = math.atan2(scale(r.now.y - r.center.y)- layer.y, scale(r.now.x - r.center.x) - layer.x)
   layer.angle = r.start.angle + (mouseCurrentAngle - mouseStartAngle)
 end
 
@@ -198,29 +226,31 @@ function love.directorydropped(dir)
 end
 
 function love.mousepressed(x, y, button)
-  window:processMouseEvent('mousepressed', {x = x, y = y, button = button})
+  window:processEvent('mousepressed', {x = x, y = y, button = button})
 end
 
 function love.mousereleased(x, y, button)
-  window:processMouseEvent('mousereleased', {x = x, y = y, button = button})
+  window:processEvent('mousereleased', {x = x, y = y, button = button})
 end
 
 function love.mousemoved(x, y, dx, dy, istouch)
-  window:processMouseEvent('mousemoved', {x = x, y = y, dx = dx, dy = dy})
+  window:processEvent('mousemoved', {x = x, y = y, dx = dx, dy = dy})
 end
 
 function love.keypressed(key, keycode, isrepeat)
   window:processEvent('keypressed', {key = key, kekycode = keycode, isrepeat = isrepeat})
 
   -- keyboard shortcuts
-  if state.layer and key == 'left' then
-    dispatch('MOVE_LAYER', state.layer, {dx = -1, dy = 0})
+  if key == 'space' then
+    dispatch('BROADCAST', {event = 'toggleplay'})
+  elseif state.layer and key == 'left' then
+    dispatch('MOVE_LAYER', state.layer, {x = -1, y = 0})
   elseif state.layer and key == 'right' then
-    dispatch('MOVE_LAYER', state.layer, {dx = 1, dy = 0})
+    dispatch('MOVE_LAYER', state.layer, {x = 1, y = 0})
   elseif state.layer and key == 'up' then
-    dispatch('MOVE_LAYER', state.layer, {dx = 0, dy = -1})
+    dispatch('MOVE_LAYER', state.layer, {x = 0, y = -1})
   elseif state.layer and key == 'down' then
-    dispatch('MOVE_LAYER', state.layer, {dx = 0, dy = 1})
+    dispatch('MOVE_LAYER', state.layer, {x = 0, y = 1})
   elseif key == 'tab' then
     dispatch('SELECT_NEXT_LAYER', love.keyboard.isDown('lshift', 'rshift'))
   elseif key == 'z' and love.keyboard.isDown('lctrl') then
@@ -228,6 +258,11 @@ function love.keypressed(key, keycode, isrepeat)
   elseif key == 'y' and love.keyboard.isDown('lctrl') then
     dispatch('REDO')
   end
+end
+
+function love.wheelmoved(scrollX, scrollY)
+  local x, y = love.mouse.getPosition()
+  window:processEvent('wheelmoved', {x = x, y = y, scrollX = scrollX, scrollY = scrollY})
 end
 
 function love.resize(w, h)
