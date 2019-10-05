@@ -13,6 +13,10 @@ local colors = {
   currentFrameBorder = {78.6/255, 146.2/255, 228.8/255, 1},
 }
 
+local icons = {
+  trash = love.graphics.newImage('resources/trash.png'),
+}
+
 -- canvas to use when we wanto to disable rendering output
 local pixel = love.graphics.newCanvas(1, 1)
 
@@ -401,11 +405,18 @@ function Header:draw()
   end
 end
 
-local Sidebar = Element:extend()
-function Sidebar:new(attr)
-  Element.new(self, attr)
+local Icon = Element:extend()
+function Icon:draw()
+  local x, y = love.mouse.getPosition()
+  love.graphics.translate(self.width / 2, self.height / 2)
+  if self:contains(x, y) then
+    love.graphics.scale(1.2)
+  end
+  love.graphics.draw(self.attr.image, -self.width / 2, -self.height / 2)
+  love.graphics.scale(1 / 1.2)
 end
 
+local Sidebar = Element:extend()
 function Sidebar:draw()
   for _, layer in ipairs(self.context.state.animation.layers) do
     local button = self:getOrCreate({id = layer.id}, function()
@@ -413,12 +424,17 @@ function Sidebar:draw()
         :on('mouseclicked', self:callback('SELECT_LAYER', layer.id))
         :on('dragmove', function(_, e) self:onDragMove(e, layer) end)
       b.drag = Drag(b, self, {vertical = true})
+      b.icon = self:add(Icon({image = icons.trash}):on('mouseclicked', self:callback('DELETE_LAYER', layer.id)))
       return b
     end)
     button.drag:support(function()
       button:render({text = layer.name, width = self.attr.width,
         hovering = button.attr.hovering or button.drag:isActive(),
         selected = (layer.id == self.context.state.layer.id)})
+      love.graphics.push()
+      move({by = {x = button.width - button.height, y = button.height / 2 - icons.trash:getHeight() / 2}})
+      button.icon:render({height = button.height, width = button.height})
+      love.graphics.pop()
     end)
     button:layout(dir.down)
   end
