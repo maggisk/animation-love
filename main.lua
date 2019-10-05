@@ -113,11 +113,8 @@ function eventhandler.SELECT_NEXT_LAYER(prev)
   end
 end
 
-function eventhandler.CHANGE_LAYER_PRIORITY(diff)
-  if #state.animation.layers > 1 then
-    history.push()
-    state.animation:swap('layers', state.layer, diff)
-  end
+function eventhandler.SET_LAYER_INDEX(layerId, priority)
+  state.animation:setIndex('layers', layerId, priority)
 end
 
 local rotateLayerEventId = -1
@@ -158,9 +155,9 @@ function eventhandler.SELECT_FRAME(id)
   assert(state.frame)
 end
 
-function eventhandler.MOVE_FRAME(diff)
+function eventhandler.MOVE_FRAME(e)
   history.push()
-  state.animation:swap('frames', state.frame, diff)
+  state.animation:setIndex('frames', e.layerId, e.index)
 end
 
 function eventhandler.SELECT_EASING(name)
@@ -225,11 +222,18 @@ function love.directorydropped(dir)
   end
 end
 
+
+local mousePressedAt = 0
 function love.mousepressed(x, y, button)
+  mousePressedAt = state.duration
   window:processEvent('mousepressed', {x = x, y = y, button = button})
 end
 
 function love.mousereleased(x, y, button)
+  if state.duration - mousePressedAt < 0.2 then
+    print('click')
+    window:processEvent('mouseclicked', {x = x, y = y, button = button})
+  end
   window:processEvent('mousereleased', {x = x, y = y, button = button})
 end
 

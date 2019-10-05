@@ -63,6 +63,18 @@ function Animation:nextId()
   return self.state.maxId
 end
 
+function Animation:setIndex(type, id, index)
+  assert(type == 'frames' or type == 'layers')
+  index = util.clamp(index, 1, #self.state[type])
+  for i, thing in ipairs(self.state[type]) do
+    if thing.id == id then
+      table.insert(self.state[type], index, table.remove(self.state[type], i))
+      return true
+    end
+  end
+  return false
+end
+
 function Animation:newLayer(blob, imagepath)
   local layer = {}
   layer.id = self:nextId()

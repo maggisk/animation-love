@@ -15,6 +15,10 @@ function util.keys(table)
   return keys
 end
 
+function util.clamp(value, min, max)
+  return math.max(min, math.min(max, value))
+end
+
 function util.remap(value, minValue, maxValue, minReturn, maxReturn)
   return minReturn + (maxReturn - minReturn) * ((value - minValue) / (maxValue - minValue))
 end

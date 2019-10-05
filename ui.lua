@@ -13,6 +13,9 @@ local colors = {
   currentFrameBorder = {78.6/255, 146.2/255, 228.8/255, 1},
 }
 
+-- canvas to use when we wanto to disable rendering output
+local pixel = love.graphics.newCanvas(1, 1)
+
 local dir = {
   left = {x = -1, y = 0},
   right = {x = 1, y = 0},
@@ -65,6 +68,94 @@ end
 function Text.print(text, size, x, y)
   love.graphics.setFont(util.getFont(size))
   love.graphics.print(text, x or 0, y or 0)
+end
+
+local Drag = Object:extend()
+
+-- render later functionality so draggable items can be rendered on top of sibling elements
+Drag.deferred = {}
+function Drag.flush()
+  for _, fn in ipairs(Drag.deferred) do
+    fn()
+  end
+  Drag.deferred = {}
+end
+
+function Drag:new(elem, origin, options)
+  assert(elem)
+  self.elem = elem
+  self.origin = origin
+  self.horizontal = options.horizontal or false
+  self.vertical = options.vertical or false
+  self.boundDragMove = function(elem, e) self:dragMove(e) end
+  self.boundDragStop = function(elem, e) self:dragStop(e) end
+  elem:on('mousepressed', function(elem, e) self:dragStart(e) end)
+end
+
+function Drag:isActive()
+  return self.elem:hasListener('windowmousemoved', self.boundDragMove)
+end
+
+function Drag:dragStart(e)
+  if e.button == 1 then
+    local x, y = love.mouse.getPosition()
+    self.start = {x = self.elem.x, y = self.elem.y, mouseX = x, mouseY = y}
+    self.last = {}
+    self.last.x = math.floor((e.x - self.origin.x) / self.elem.width)
+    self.last.y = math.floor((e.y - self.origin.y) / self.elem.height)
+    self.elem:on('windowmousemoved', self.boundDragMove)
+    self.elem:on('windowmousereleased', self.boundDragStop)
+  end
+end
+
+function Drag:dragStop(e)
+  if e.button == 1 then
+    self.mouseMove = {x = 0, y = 0}
+    self.elem:off('windowmousemoved', self.boundDragMove)
+    self.elem:off('windowmousereleased', self.boundDragStop)
+  end
+end
+
+function Drag:dragMove(e)
+  local now = {x = 0, y = 0}
+  if self.horizontal then
+    now.x = math.floor((e.x - self.origin.x) / self.elem.width) + 1
+  end
+  if self.vertical then
+    now.y = math.floor((e.y - self.origin.y) / self.elem.height) + 1
+  end
+
+  if now.x ~= self.last.x or now.y ~= self.last.y then
+    self.elem:trigger('dragmove', now)
+    self.last = now
+  end
+end
+
+function Drag:support(fn)
+  if not self:isActive() then
+    return fn()
+  end
+
+  -- call render so the element takes up space but isn't displayed
+  love.graphics.setCanvas({pixel, stencil = true})
+  fn()
+  love.graphics.setCanvas()
+
+  table.insert(Drag.deferred, function()
+    -- draw the element relative to mouse position
+    love.graphics.push()
+    love.graphics.origin()
+    love.graphics.translate(self.start.x, self.start.y)
+    local x, y = love.mouse.getPosition()
+    if self.horizontal then
+      love.graphics.translate(x - self.start.mouseX, 0)
+    end
+    if self.vertical then
+      love.graphics.translate(0, y - self.start.mouseY)
+    end
+    self.elem:draw()
+    love.graphics.pop()
+  end)
 end
 
 local Element = Object:extend()
@@ -286,14 +377,8 @@ function Header:new(attr)
 
     -- frame subtabs
     Button({below = 'frame', id = 'easing'}):on('mousepressed', self:callback('BROADCAST', {event = 'easingtoggle'})),
-    Button({below = 'frame', text = 'move left'}):on('mousepressed', self:callback('MOVE_FRAME', -1)),
-    Button({below = 'frame', text = 'move right'}):on('mousepressed', self:callback('MOVE_FRAME', 1)),
     Button({below = 'frame', text = 'add'}):on('mousepressed', self:callback('NEW_FRAME')),
-    Button({below = 'frame', text = 'delete'}):on('mousepressed', self:callback('DELETE_FRAME')),
-
-    -- buttons to move layers up/down
-    Button({type = 'movelayer', text = "up"}):on('mousepressed', self:callback('CHANGE_LAYER_PRIORITY', -1)),
-    Button({type = 'movelayer', text = "down"}):on('mousepressed', self:callback('CHANGE_LAYER_PRIORITY', 1))
+    Button({below = 'frame', text = 'delete'}):on('mousepressed', self:callback('DELETE_FRAME'))
   )
 end
 
@@ -301,14 +386,8 @@ function Header:draw()
   first(self:query({id = 'easing'})).attr.text = self.context.state.frame.easing
   local h = 30 -- tab height
 
-  -- button far left to change which layer is on top of which
-  move({to = {y = self.attr.height - h}})
-  for button in self:query({type = 'movelayer'}) do
-    button:render({fontsize = 16}, dir.right)
-  end
-
   -- subtabs first
-  move({to = {x = self.attr.left}})
+  move({to = {x = self.attr.left, y = self.attr.height - h}})
   for tab in self:query({below = self.tab}) do
     tab:render({height = h}, dir.right)
   end
@@ -325,13 +404,32 @@ function Header:draw()
 end
 
 local Sidebar = Element:extend()
+function Sidebar:new(attr)
+  Element.new(self, attr)
+  self.draggables = {}
+end
+
 function Sidebar:draw()
   for _, layer in ipairs(self.context.state.animation.layers) do
     local button = self:getOrCreate({id = layer.id}, function()
-      return Button({id = layer.id}):on('mousepressed', self:callback('SELECT_LAYER', layer.id))
+      local b = Button({id = layer.id})
+        :on('mouseclicked', self:callback('SELECT_LAYER', layer.id))
+        :on('dragmove', function(_, e) self:onDragMove(e, layer) end)
+      self.draggables[b] = Drag(b, self, {vertical = true})
+      return b
     end)
-    button:render({text = layer.name, width = self.attr.width, selected = (layer.id == self.context.state.layer.id)}, dir.down)
+    self.draggables[button]:support(function()
+      button:render({text = layer.name, width = self.attr.width,
+        hovering = button.attr.hovering or self.draggables[button]:isActive(),
+        selected = (layer.id == self.context.state.layer.id)})
+    end)
+    button:layout(dir.down)
   end
+  Drag.flush()
+end
+
+function Sidebar:onDragMove(e, layer)
+  self.context.dispatch('SET_LAYER_INDEX', layer.id, e.y)
 end
 
 local Frame = Element:extend()
@@ -479,24 +577,40 @@ function PlayButton:draw()
 end
 
 local Frames = Element:extend()
+function Frames:new(attr)
+  Element.new(self, attr)
+  self.draggables = {}
+end
+
 function Frames:draw()
   local pad = 5
   move({by = {y = pad}})
   local framesize = self.height - pad * 2
   for i, frame in ipairs(self.context.state.animation.frames) do
     local elem = self:getOrCreate({id = frame.id}, function()
-      return Frame({id = frame.id, scale = 0.2}):on('mousepressed', self:callback('SELECT_FRAME', frame.id))
+      local f = Frame({id = frame.id, scale = 0.2})
+      f:on('mousepressed', self:callback('SELECT_FRAME', frame.id))
+      f:on('dragmove', function(_, e) self:onDragMove(frame.id, e) end)
+      self.draggables[f] = Drag(f, self, {horizontal = true})
+      return f
     end)
-    elem:render({width = framesize, height = framesize, frame = i})
-    if frame == self.context.state.frame then
-      love.graphics.setColor(colors.currentFrameBorder)
-      love.graphics.setLineWidth(3)
-      love.graphics.rectangle("line", 1, 1, framesize - 2, framesize - 2)
-      love.graphics.setColor(1, 1, 1, 1)
-    end
+    self.draggables[elem]:support(function()
+      elem:render({width = framesize, height = framesize, frame = i})
+      if frame == self.context.state.frame then
+        love.graphics.setColor(colors.currentFrameBorder)
+        love.graphics.setLineWidth(3)
+        love.graphics.rectangle("line", 1, 1, framesize - 2, framesize - 2)
+        love.graphics.setColor(1, 1, 1, 1)
+      end
+    end)
     move({by = {x = pad}})
     elem:layout(dir.right)
   end
+  Drag.flush()
+end
+
+function Frames:onDragMove(layerId, e)
+  self.context.dispatch('MOVE_FRAME', {layerId = layerId, index = e.x})
 end
 
 local Easing = Element:extend()
