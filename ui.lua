@@ -589,8 +589,8 @@ function Frames:draw()
   for i, frame in ipairs(self.context.state.animation.frames) do
     local elem = self:getOrCreate({id = frame.id}, function()
       local f = Frame({id = frame.id, scale = 0.2})
-      f:on('mousepressed', self:callback('SELECT_FRAME', frame.id))
-      f:on('dragmove', function(_, e) self:onDragMove(frame.id, e) end)
+        :on('mouseclicked', self:callback('SELECT_FRAME', frame.id))
+        :on('dragmove', function(_, e) self:onDragMove(frame.id, e) end)
       self.draggables[f] = Drag(f, self, {horizontal = true})
       return f
     end)
