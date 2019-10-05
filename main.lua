@@ -191,6 +191,7 @@ end
 
 function love.draw()
   window:render()
+  ui.Drag.flush()
 end
 
 function love.update(dt)
@@ -223,15 +224,14 @@ function love.directorydropped(dir)
 end
 
 
-local mousePressedAt = 0
+local press = nil
 function love.mousepressed(x, y, button)
-  mousePressedAt = state.duration
+  press = {time = state.duration, x = x, y = y, button = button}
   window:processEvent('mousepressed', {x = x, y = y, button = button})
 end
 
 function love.mousereleased(x, y, button)
-  if state.duration - mousePressedAt < 0.2 then
-    print('click')
+  if press and state.duration - press.time < 0.2 and press.x == x and press.y == y and press.button == button then
     window:processEvent('mouseclicked', {x = x, y = y, button = button})
   end
   window:processEvent('mousereleased', {x = x, y = y, button = button})

@@ -376,9 +376,7 @@ function Header:new(attr)
     Button({text = "New", below = 'joint'}):on('mousepressed', self:callback('NEW_JOINT')),
 
     -- frame subtabs
-    Button({below = 'frame', id = 'easing'}):on('mousepressed', self:callback('BROADCAST', {event = 'easingtoggle'})),
-    Button({below = 'frame', text = 'add'}):on('mousepressed', self:callback('NEW_FRAME')),
-    Button({below = 'frame', text = 'delete'}):on('mousepressed', self:callback('DELETE_FRAME'))
+    Button({below = 'frame', id = 'easing'}):on('mousepressed', self:callback('BROADCAST', {event = 'easingtoggle'}))
   )
 end
 
@@ -406,7 +404,6 @@ end
 local Sidebar = Element:extend()
 function Sidebar:new(attr)
   Element.new(self, attr)
-  self.draggables = {}
 end
 
 function Sidebar:draw()
@@ -415,17 +412,16 @@ function Sidebar:draw()
       local b = Button({id = layer.id})
         :on('mouseclicked', self:callback('SELECT_LAYER', layer.id))
         :on('dragmove', function(_, e) self:onDragMove(e, layer) end)
-      self.draggables[b] = Drag(b, self, {vertical = true})
+      b.drag = Drag(b, self, {vertical = true})
       return b
     end)
-    self.draggables[button]:support(function()
+    button.drag:support(function()
       button:render({text = layer.name, width = self.attr.width,
-        hovering = button.attr.hovering or self.draggables[button]:isActive(),
+        hovering = button.attr.hovering or button.drag:isActive(),
         selected = (layer.id == self.context.state.layer.id)})
     end)
     button:layout(dir.down)
   end
-  Drag.flush()
 end
 
 function Sidebar:onDragMove(e, layer)
@@ -579,7 +575,10 @@ end
 local Frames = Element:extend()
 function Frames:new(attr)
   Element.new(self, attr)
-  self.draggables = {}
+  self.buttons = {
+    self:add(Button({text = "+", fontsize = 50, align="center"})):on('mouseclicked', self:callback('NEW_FRAME')),
+    self:add(Button({text = "-", fontsize = 50, align="center"})):on('mouseclicked', self:callback('DELETE_FRAME')),
+  }
 end
 
 function Frames:draw()
@@ -591,10 +590,10 @@ function Frames:draw()
       local f = Frame({id = frame.id, scale = 0.2})
         :on('mouseclicked', self:callback('SELECT_FRAME', frame.id))
         :on('dragmove', function(_, e) self:onDragMove(frame.id, e) end)
-      self.draggables[f] = Drag(f, self, {horizontal = true})
+      f.drag = Drag(f, self, {horizontal = true})
       return f
     end)
-    self.draggables[elem]:support(function()
+    elem.drag:support(function()
       elem:render({width = framesize, height = framesize, frame = i})
       if frame == self.context.state.frame then
         love.graphics.setColor(colors.currentFrameBorder)
@@ -606,7 +605,11 @@ function Frames:draw()
     move({by = {x = pad}})
     elem:layout(dir.right)
   end
-  Drag.flush()
+
+  btnsize = self.height / 2 - pad
+  for _, button in ipairs(self.buttons) do
+    button:render({width = btnsize, height = btnsize}, dir.down)
+  end
 end
 
 function Frames:onDragMove(layerId, e)
@@ -693,4 +696,5 @@ end
 
 return {
   Window = Window,
+  Drag = Drag,
 }

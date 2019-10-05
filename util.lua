@@ -3,6 +3,7 @@ local util = {}
 -- font handling
 local fonts = {}
 function util.getFont(size)
+  assert(type(size) == "number")
   fonts[size] = fonts[size] or love.graphics.newFont("resources/AlegreyaSans-Regular.ttf", size)
   return fonts[size]
 end
