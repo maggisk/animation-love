@@ -176,6 +176,12 @@ function eventhandler.CHANGE_SCALE(e)
   end
 end
 
+function eventhandler.CHANGE_SHEARING(e)
+  assert(state.layer)
+  local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
+  framelayer[e.which] = (framelayer[e.which] or 0) + e.v * 0.1
+end
+
 function eventhandler.BROADCAST(data)
   window:broadcast(data.event, data.payload)
 end

@@ -31,7 +31,7 @@ function Animation:new(state)
   self.state = state or {
     maxId = 1,
     layers = {},
-    frames = {{id = 1, easing = 'linear', duration = 0.3, scaleX = 1, scaleY = 1}},
+    frames = {{id = 1, easing = 'linear', duration = 0.3, scaleX = 1, scaleY = 1, shearX = 0, shearY = 0}},
     joints = {},
     framelayers = {{}},
     framejoints = {{}},

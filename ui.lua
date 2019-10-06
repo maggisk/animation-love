@@ -651,11 +651,34 @@ function ScalePicker:draw()
   self.scaleY:render({text = "y-axis: " .. tostring(l.scaleY):sub(1, 4)}, dir.down)
 end
 
+local ShearPicker = Element:extend()
+function ShearPicker:new(attr)
+  Element.new(self, attr)
+  local function onWheelMoved(button, e)
+    self.context.dispatch('CHANGE_SHEARING', {which = button.attr.which, v = e.scrollY})
+    return false
+  end
+
+  self.shearX = self:add(Button({width = 120, align = 'left', which = 'shearX'})):on('wheelmoved', onWheelMoved)
+  self.shearY = self:add(Button({width = 120, align = 'left', which = 'shearY'})):on('wheelmoved', onWheelMoved)
+end
+
+function ShearPicker:draw()
+  title('Shearing')
+  local l = self.context.state.animation:readFromFirst(
+    {"framelayers", self.context.state.frame.id, self.context.state.layer.id},
+    {"layers", id = self.context.state.layer.id},
+    {"frames", id = self.context.state.frame.id})
+  self.shearX:render({text = "x-axis: " .. tostring(l.shearX)}, dir.down)
+  self.shearY:render({text = "y-axis: " .. tostring(l.shearY)}, dir.down)
+end
+
 local Advanced = Element:extend()
 function Advanced:new(attr)
   Element.new(self, attr,
     EasingPicker(),
-    ScalePicker()
+    ScalePicker({width = 150}),
+    ShearPicker({width = 150})
   )
   self.isOpen = false
   self:on('toggleadvanced', function() self.isOpen = not self.isOpen end)
