@@ -8,6 +8,22 @@ function util.getFont(size)
   return fonts[size]
 end
 
+function util.radToDeg(rad)
+  return rad * (180 / math.pi)
+end
+
+function util.degToRad(deg)
+  return deg * (math.pi / 180)
+end
+
+function util.list(iterable)
+  local r = {}
+  for v in iterable do
+    r[#r+1] = v
+  end
+  return r
+end
+
 function util.keys(table)
   local keys = {}
   for k, _ in pairs(table) do

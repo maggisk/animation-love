@@ -83,7 +83,7 @@ function Animation:newLayer(blob, imagepath)
   self.images[layer.id] = love.graphics.newImage(love.image.newImageData(love.filesystem.newFileData(blob, imagepath)))
 
   for _, frame in ipairs(self.state.frames) do
-    self.state.framelayers[frame.id][layer.id] = {x = 0, y = 0, angle = 0, opacity = 1}
+    self.state.framelayers[frame.id][layer.id] = {x = 0, y = 0, angle = 0, opacity = 1, rotdir = -1}
   end
 
   return layer

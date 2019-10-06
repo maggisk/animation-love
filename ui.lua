@@ -181,16 +181,20 @@ function Element:getCenter()
   return (self.width or self.attr.width) / 2, (self.height or self.attr.height) / 2
 end
 
-function Element:on(name, fn)
-  assert(name and fn)
-  self.events[name] = self.events[name] or {}
-  table.insert(self.events[name], fn)
+function Element:on(names, fn)
+  assert(names and fn)
+  for name in names:gmatch("(%S+)") do
+    self.events[name] = self.events[name] or {}
+    table.insert(self.events[name], fn)
+  end
   return self
 end
 
-function Element:off(name, fn)
-  assert(self:hasListener(name, fn))
-  table.remove(self.events[name], util.indexOf(self.events[name], fn))
+function Element:off(names, fn)
+  for name in names:gmatch("(%S+)") do
+    assert(self:hasListener(name, fn))
+    table.remove(self.events[name], util.indexOf(self.events[name], fn))
+  end
 end
 
 function Element:hasListener(name, fn)
@@ -213,17 +217,18 @@ function Element:broadcast(name, e)
 end
 
 function Element:processEvent(name, e)
-  for i = #self.children, 1, -1 do
-    if self.children[i]:processEvent(name, e) == false then
+  if self.visible then
+    for i = #self.children, 1, -1 do
+      if self.children[i]:processEvent(name, e) == false then
+        return false
+      end
+    end
+    local isMouseEvent = (e.x and e.y) ~= nil
+    if (not isMouseEvent and self:trigger(name, e) == false) or
+       (isMouseEvent and self:contains(e.x, e.y) and self:trigger(name, e) == false) or
+       (isMouseEvent and self:trigger('window' .. name, e) == false) then
       return false
     end
-  end
-  local isMouseEvent = (e.x and e.y) ~= nil
-  if self.visible and (
-      (not isMouseEvent and self:trigger(name, e) == false) or
-      (isMouseEvent and self:contains(e.x, e.y) and self:trigger(name, e) == false) or
-      (isMouseEvent and self:trigger('window' .. name, e) == false)) then
-    return false
   end
 end
 
@@ -376,12 +381,11 @@ function Sidebar:draw()
       local b = Button({id = layer.id})
         :on('mouseclicked', self:callback('SELECT_LAYER', layer.id))
         :on('dragmove', function(_, e) self:onDragMove(e, layer) end)
-      b.drag = Drag(b, self, {vertical = true})
+      Drag(b, self, {vertical = true})
       b.icon = self:add(Icon({image = icons.trash}):on('mouseclicked', self:callback('DELETE_LAYER', layer.id)))
       return b
     end)
     button:render({text = layer.name, width = self.attr.width,
-      hovering = button.attr.hovering or button.drag:isActive(),
       selected = (layer.id == self.context.state.layer.id)})
     love.graphics.push()
     move({by = {x = button.width - button.height, y = button.height / 2 - icons.trash:getHeight() / 2}})
@@ -557,7 +561,7 @@ function Frames:draw()
       local f = Frame({id = frame.id, scale = 0.2})
         :on('mouseclicked', self:callback('SELECT_FRAME', frame.id))
         :on('dragmove', function(_, e) self:onDragMove(frame.id, e) end)
-      f.drag = Drag(f, self, {horizontal = true})
+      Drag(f, self, {horizontal = true})
       return f
     end)
     elem:render({width = framesize, height = framesize, frame = i})
@@ -616,11 +620,10 @@ function EasingPicker:new(attr)
 end
 
 function EasingPicker:draw()
-  self.x, self.y = whereami()
   title("Movement")
-  self.width = 400
+  self.width = 300
 
-  local time = (self.context.state.duration) % 2 / 2
+  local time = (self.context.state.duration % 2) / 2
   for _, child in ipairs(self.children) do
     child:render({time = time, width = self.width, height = 30}, dir.down)
   end
@@ -688,18 +691,43 @@ function OpacityPicker:draw()
   self.button:render({text = tostring(opacity)}, dir.down)
 end
 
+local RotationPicker = Element:extend()
+function RotationPicker:new(attr)
+  Element.new(self, attr)
+  self.angle = self:add(Button({align = 'left', width = 100})):on('wheelmoved', function(_, e)
+    self.context.dispatch('CHANGE_ANGLE', e.scrollY)
+    return false
+  end)
+  self.direction = self:add(Button({align = 'left', width = 100})):on('mouseclicked', function()
+    self.context.dispatch('TOGGLE_ROTATION_DIRECTION')
+    return false
+  end)
+end
+
+function RotationPicker:draw()
+  title('Rotation')
+  local framelayer = self.context.state.animation.framelayers[self.context.state.frame.id][self.context.state.layer.id]
+  self.angle:render({text = util.radToDeg(framelayer.angle)}, dir.down)
+  local dirtext = ({[1] = 'Clockwise', [-1] = 'Counter-clockwise'})[framelayer.rotdir]
+  self.direction:render({text = dirtext}, dir.down)
+end
+
 local Advanced = Element:extend()
 function Advanced:new(attr)
   Element.new(self, attr,
     EasingPicker(),
     ScalePicker({width = 120}),
     ShearPicker({width = 120}),
-    OpacityPicker({width = 120}))
+    OpacityPicker({width = 120}),
+    RotationPicker({widht = 120})
+  )
   self.isOpen = false
   self:on('toggleadvanced', function() self.isOpen = not self.isOpen end)
+  self:on('mousemoved mousepressed mouseclicked wheelmoved', function() return false end)
 end
 
 function Advanced:draw()
+  self.visible = self.isOpen
   if not self.isOpen then return end
 
   move({to = {x = self.attr.left, y = self.attr.top}})

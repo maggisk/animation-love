@@ -187,6 +187,16 @@ function eventhandler.CHANGE_OPACITY(diff)
   framelayer.opacity = util.clamp(framelayer.opacity + 0.05 * diff, 0, 1)
 end
 
+function eventhandler.CHANGE_ANGLE(diff)
+  local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
+  framelayer.angle = framelayer.angle + util.degToRad(diff)
+end
+
+function eventhandler.TOGGLE_ROTATION_DIRECTION()
+  local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
+  framelayer.rotdir = framelayer.rotdir * -1
+end
+
 function eventhandler.BROADCAST(data)
   window:broadcast(data.event, data.payload)
 end

@@ -129,8 +129,8 @@ function Animation:draw()
     local scaleY = (thisLayer.scaleY or thisFrame.scaleY) * (1 - pos) + (nextLayer.scaleY or nextFrame.scaleY) * pos
     local shearX = (thisLayer.shearX or thisFrame.shearX) * (1 - pos) + (nextLayer.shearX or nextFrame.shearX) * pos
     local shearY = (thisLayer.shearY or thisFrame.shearY) * (1 - pos) + (nextLayer.shearY or nextFrame.shearY) * pos
-    love.graphics.push()
     love.graphics.setColor(1, 1, 1, thisLayer.opacity)
+    love.graphics.push()
     love.graphics.shear(shearX, shearY)
     love.graphics.draw(image, x, y, angle, scaleX, scaleY, w / 2, h / 2)
     love.graphics.pop()
