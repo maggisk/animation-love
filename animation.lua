@@ -2,15 +2,6 @@ local Object = require "classic"
 local util = require "util"
 local playback = require "playback"
 
-local function locate(array, id)
-  for i = 1, #array do
-    if array[i].id == id then
-      return array[i]
-    end
-  end
-  assert(false)
-end
-
 -- decode is in playback.lua because we want that to be a standalone file with
 -- no dependecies and nothing irrelevant to playback
 local function encode(obj, buf, indent)
@@ -40,7 +31,7 @@ function Animation:new(state)
   self.state = state or {
     maxId = 1,
     layers = {},
-    frames = {{id = 1, easing = 'linear', duration = 0.3}},
+    frames = {{id = 1, easing = 'linear', duration = 0.3, scaleX = 1, scaleY = 1}},
     joints = {},
     framelayers = {{}},
     framejoints = {{}},
@@ -48,6 +39,10 @@ function Animation:new(state)
 
   -- make it accessible on the animation object without using .state
   util.extend(self, self.state)
+end
+
+function Animation:find(type, id)
+  return util.find(self.state[type], function(thing) return thing.id == id end)
 end
 
 function Animation:copy()
@@ -138,11 +133,29 @@ end
 function Animation:reader(frameId, type, typeId)
   assert(frameId)
   assert(typeId)
-  local thisFrame = self.state['frame' .. type][frameId][typeId]
-  local allFrames = locate(self.state[type], typeId)
+  local frameSpecific = self.state['frame' .. type][frameId][typeId]
+  local allFrames = self:find(type, typeId)
   return setmetatable({}, {
     __index = function(_, k)
-      return thisFrame[k] or allFrames[k]
+      return frameSpecific[k] or allFrames[k]
+    end
+  })
+end
+
+function Animation:readFromFirst(...)
+  local options = {}
+  for _, v in ipairs({...}) do
+    if v.id then
+      table.insert(options, self:find(v[1], v.id))
+    else
+      table.insert(options, self.state[v[1]][v[2]][v[3]])
+    end
+  end
+  return setmetatable({}, {
+    __index = function(_, k)
+      for _, o in ipairs(options) do
+        if o[k] ~= nil then return o[k] end
+      end
     end
   })
 end

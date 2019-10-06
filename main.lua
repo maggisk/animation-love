@@ -165,6 +165,17 @@ function eventhandler.SELECT_EASING(name)
   state.frame.easing = name
 end
 
+function eventhandler.CHANGE_SCALE(e)
+  assert(state.layer)
+  local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
+  framelayer[e.which] = framelayer[e.which] or 1
+  if e.v > 0 then
+    framelayer[e.which] = framelayer[e.which] * (10/9) * e.v
+  else
+    framelayer[e.which] = framelayer[e.which] * (9/10) * -e.v
+  end
+end
+
 function eventhandler.BROADCAST(data)
   window:broadcast(data.event, data.payload)
 end
@@ -175,14 +186,15 @@ function love.load(arg)
   love.window.setDisplaySleepEnabled(true)
   love.window.setTitle("Animation Love")
 
-  window = ui.Window()
-  window.context = {
+  dispatch('NEW_PROJECT')
+
+  local context = {
     state = state,
     window = {width = w, height = h},
     dispatch = dispatch,
   }
 
-  dispatch('NEW_PROJECT')
+  window = ui.Window(context, {})
 
   for _, filename in ipairs(arg) do
     state.layer = state.animation:newLayer(io.open(filename, 'rb'):read('*a'), filename)
@@ -191,7 +203,6 @@ end
 
 function love.draw()
   window:render()
-  ui.Drag.flush()
 end
 
 function love.update(dt)
@@ -231,7 +242,7 @@ function love.mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
-  if press and state.duration - press.time < 0.2 and press.x == x and press.y == y and press.button == button then
+  if press and state.duration - press.time < 0.2 and press.button == button then
     window:processEvent('mouseclicked', {x = x, y = y, button = button})
   end
   window:processEvent('mousereleased', {x = x, y = y, button = button})
@@ -271,4 +282,5 @@ end
 
 function love.resize(w, h)
   window.context.window = {width = w, height = h}
+  window:broadcast('resize', {width = w, height = h})
 end

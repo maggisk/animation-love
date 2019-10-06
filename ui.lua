@@ -17,9 +17,6 @@ local icons = {
   trash = love.graphics.newImage('resources/trash.png'),
 }
 
--- canvas to use when we wanto to disable rendering output
-local pixel = love.graphics.newCanvas(1, 1)
-
 local dir = {
   left = {x = -1, y = 0},
   right = {x = 1, y = 0},
@@ -72,18 +69,10 @@ end
 function Text.print(text, size, x, y)
   love.graphics.setFont(util.getFont(size))
   love.graphics.print(text, x or 0, y or 0)
+  return Text.getDimensions(text, size)
 end
 
 local Drag = Object:extend()
-
--- render later functionality so draggable items can be rendered on top of sibling elements
-Drag.deferred = {}
-function Drag.flush()
-  for _, fn in ipairs(Drag.deferred) do
-    fn()
-  end
-  Drag.deferred = {}
-end
 
 function Drag:new(elem, origin, options)
   assert(elem)
@@ -133,33 +122,6 @@ function Drag:dragMove(e)
     self.elem:trigger('dragmove', now)
     self.last = now
   end
-end
-
-function Drag:support(fn)
-  if not self:isActive() then
-    return fn()
-  end
-
-  -- call render so the element takes up space but isn't displayed
-  love.graphics.setCanvas({pixel, stencil = true})
-  fn()
-  love.graphics.setCanvas()
-
-  table.insert(Drag.deferred, function()
-    -- draw the element relative to mouse position
-    love.graphics.push()
-    love.graphics.origin()
-    love.graphics.translate(self.start.x, self.start.y)
-    local x, y = love.mouse.getPosition()
-    if self.horizontal then
-      love.graphics.translate(x - self.start.mouseX, 0)
-    end
-    if self.vertical then
-      love.graphics.translate(0, y - self.start.mouseY)
-    end
-    self.elem:draw()
-    love.graphics.pop()
-  end)
 end
 
 local Element = Object:extend()
@@ -361,7 +323,7 @@ function Header:new(attr)
     -- main tabs
     Button({id = 'file', type = 'main', text = "File"}):on('mousepressed', setTab),
     Button({id = 'edit', type = 'main', text = "Edit"}):on('mousepressed', setTab),
-    Button({id = 'layer', type = 'main', text = "Layer"}):on('mousepressed', setTab),
+    Button({id = 'options', type = 'main', text = "Options"}):on('mousepressed', self:callback('BROADCAST', {event = 'toggleadvanced'})),
     Button({id = 'joint', type = 'main', text = "Joints"}):on('mousepressed', setTab),
     Button({id = 'frame', type = 'main', text = "Frame"}):on('mousepressed', setTab),
 
@@ -372,9 +334,6 @@ function Header:new(attr)
     -- edit subtabs
     Button({text = 'Undo', below = 'edit'}):on('mousepressed', self:callback('UNDO')),
     Button({text = 'Redo', below = 'edit'}):on('mousepressed', self:callback('REDO')),
-
-    -- layer subtabs
-    Button({text = 'Delete', below = 'layer'}):on('mousepressed', self:callback('DELETE_LAYER')),
 
     -- joint subtabs
     Button({text = "New", below = 'joint'}):on('mousepressed', self:callback('NEW_JOINT')),
@@ -388,20 +347,14 @@ function Header:draw()
   first(self:query({id = 'easing'})).attr.text = self.context.state.frame.easing
   local h = 30 -- tab height
 
-  -- subtabs first
-  move({to = {x = self.attr.left, y = self.attr.height - h}})
-  for tab in self:query({below = self.tab}) do
-    tab:render({height = h}, dir.right)
-  end
-
   -- pretty line separator
-  move({to = {x = self.attr.left}, by = {y = -3}})
-  background(colors.button.selected.background, -self.attr.left, 0, self.width, 3)
+  move({to = {x = self.attr.left, y = self.attr.height - 3}})
+  background(colors.button.selected.background, 0, 0, self.width, 3)
 
   -- main tabs
   move({by = {y = -h}})
   for tab in self:query({type = 'main'}) do
-    tab:render({selected = (self.tab == tab.attr.id), align = "left", height = h, fontsize = 28, width = 100}, dir.right)
+    tab:render({selected = (self.tab == tab.attr.id), align = "left", height = h, fontsize = 28, width = 120}, dir.right)
   end
 end
 
@@ -427,15 +380,13 @@ function Sidebar:draw()
       b.icon = self:add(Icon({image = icons.trash}):on('mouseclicked', self:callback('DELETE_LAYER', layer.id)))
       return b
     end)
-    button.drag:support(function()
-      button:render({text = layer.name, width = self.attr.width,
-        hovering = button.attr.hovering or button.drag:isActive(),
-        selected = (layer.id == self.context.state.layer.id)})
-      love.graphics.push()
-      move({by = {x = button.width - button.height, y = button.height / 2 - icons.trash:getHeight() / 2}})
-      button.icon:render({height = button.height, width = button.height})
-      love.graphics.pop()
-    end)
+    button:render({text = layer.name, width = self.attr.width,
+      hovering = button.attr.hovering or button.drag:isActive(),
+      selected = (layer.id == self.context.state.layer.id)})
+    love.graphics.push()
+    move({by = {x = button.width - button.height, y = button.height / 2 - icons.trash:getHeight() / 2}})
+    button.icon:render({height = button.height, width = button.height})
+    love.graphics.pop()
     button:layout(dir.down)
   end
 end
@@ -609,23 +560,26 @@ function Frames:draw()
       f.drag = Drag(f, self, {horizontal = true})
       return f
     end)
-    elem.drag:support(function()
-      elem:render({width = framesize, height = framesize, frame = i})
-      if frame == self.context.state.frame then
-        love.graphics.setColor(colors.currentFrameBorder)
-        love.graphics.setLineWidth(3)
-        love.graphics.rectangle("line", 1, 1, framesize - 2, framesize - 2)
-        love.graphics.setColor(1, 1, 1, 1)
-      end
-    end)
+    elem:render({width = framesize, height = framesize, frame = i})
+    if frame == self.context.state.frame then
+      love.graphics.setColor(colors.currentFrameBorder)
+      love.graphics.setLineWidth(3)
+      love.graphics.rectangle("line", 1, 1, framesize - 2, framesize - 2)
+      love.graphics.setColor(1, 1, 1, 1)
+    end
     move({by = {x = pad}})
     elem:layout(dir.right)
   end
 
-  btnsize = self.height / 2 - pad
+  local btnsize = self.height / 2 - pad
   for _, button in ipairs(self.buttons) do
     button:render({width = btnsize, height = btnsize}, dir.down)
   end
+end
+
+local function title(text)
+  local w, h = Text.print(text, 20)
+  move({by = {y = h + 10}})
 end
 
 function Frames:onDragMove(layerId, e)
@@ -639,7 +593,6 @@ function Easing:new(attr)
 end
 
 function Easing:draw()
-  background(colors.background, 0, 0, self.attr.width, self.attr.height)
   self.button:render({width = self.attr.width, height = self.attr.height})
   local bw = 120 -- button space
   local lw = self.attr.width - bw - 10 -- easing line width
@@ -654,55 +607,111 @@ end
 local EasingPicker = Element:extend()
 function EasingPicker:new(attr)
   Element.new(self, attr)
-  self.isOpen = false
   self.names = util.keys(playback.easing)
   table.sort(self.names)
 
   for _, name in ipairs(self.names) do
-    self:add(Easing({name = name})):on('mousepressed', self:callback('SELECT_EASING', name))
+    self:add(Easing({name = name})):on('mouseclicked', self:callback('SELECT_EASING', name))
   end
-
-  self:on('easingtoggle', self.toggle)
-  self:on('windowmousepressed', self.toggle)
-end
-
-function EasingPicker:toggle()
-  self.isOpen = not self.isOpen
-  self.start = self.context.state.duration
-  return false
 end
 
 function EasingPicker:draw()
-  self.visible = self.isOpen
-  if not self.isOpen then return end
-  move({to = {x = self.attr.left, y = self.attr.top}})
-
   self.x, self.y = whereami()
+  title("Movement")
   self.width = 400
-  self.height = 30 * #self.children
 
-  local time = (self.context.state.duration - self.start) % 2 / 2
+  local time = (self.context.state.duration) % 2 / 2
   for _, child in ipairs(self.children) do
     child:render({time = time, width = self.width, height = 30}, dir.down)
   end
+
+  local x, y = whereami()
+  self.height = y - self.y
+end
+
+local ScalePicker = Element:extend()
+function ScalePicker:new(...)
+  Element.new(self, ...)
+  local function onWheelMoved(button, e)
+    self.context.dispatch('CHANGE_SCALE', {which = button.attr.which, v = e.scrollY})
+    return false
+  end
+
+  self.scaleX = self:add(Button({width = 120, align = "left", which = 'scaleX'})):on('wheelmoved', onWheelMoved)
+  self.scaleY = self:add(Button({width = 120, align = "left", which = 'scaleY'})):on('wheelmoved', onWheelMoved)
+end
+
+function ScalePicker:draw()
+  title("Scale")
+  local l = self.context.state.animation:readFromFirst(
+    {"framelayers", self.context.state.frame.id, self.context.state.layer.id},
+    {"layers", id = self.context.state.layer.id},
+    {"frames", id = self.context.state.frame.id})
+  self.scaleX:render({text = "x-axis: " .. tostring(l.scaleX):sub(1, 4)}, dir.down)
+  self.scaleY:render({text = "y-axis: " .. tostring(l.scaleY):sub(1, 4)}, dir.down)
+end
+
+local Advanced = Element:extend()
+function Advanced:new(attr)
+  Element.new(self, attr,
+    EasingPicker(),
+    ScalePicker()
+  )
+  self.isOpen = false
+  self:on('toggleadvanced', function() self.isOpen = not self.isOpen end)
+end
+
+function Advanced:draw()
+  if not self.isOpen then return end
+
+  move({to = {x = self.attr.left, y = self.attr.top}})
+  background({0, 0, 0, 0.8}, 0, 0, self.width, self.height)
+
+  local pad = 20
+  move({by = {x = pad, y = pad}})
+
+  -- title
+  love.graphics.setColor(colors.button.selected.background)
+  Text.print(self.context.state.layer.name, 40)
+  move({by = {y = 40}})
+  love.graphics.setColor(1, 1, 1, 1)
+  Text.print("Frame #" .. util.indexOf(self.context.state.animation.frames, self.context.state.frame), 20)
+
+  move({to = {x = self.attr.left + pad}, by = {y = 50 + pad}})
+  for _, child in ipairs(self.children) do
+    child:render({}, dir.right)
+    -- move into function and share with Window.draw
+    if child.x + child.width >= self.width then
+      move({to = {x = (self.attr.left or 0) + pad}, by = {y = child.height + pad}})
+    else
+      move({by = {x = pad}})
+    end
+  end
+end
+
+function Advanced:title(text)
+  local w, h = Text.print(text, 20)
+  move({by = {y = h + 10}})
 end
 
 local Window = Element:extend()
-function Window:new(attr)
+function Window:new(context, attr)
   Element.new(self, attr,
     Header({height = 100, left = 200}),
     Sidebar({width = 200, bottom = 100}),
     AnimationArea({bottom = 100}),
     PlayButton({width = 200}),
     Frames(),
-    EasingPicker({left = 200, top = 100})
+    Advanced({reset = true, left = 200, top = 100, bottom = 100})
   )
+  self.context = context
 end
 
 function Window:draw()
   background(colors.background, 0, 0, self.width, self.height)
 
   for _, child in ipairs(self.children) do
+    if child.attr.reset then move({to = {x = child.attr.left or 0, y = child.attr.top or 0}}) end
     child:render({}, dir.right)
     if child.x + child.width >= self.width then
       move({to = {x = 0}, by = {y = child.height}})
@@ -712,5 +721,4 @@ end
 
 return {
   Window = Window,
-  Drag = Drag,
 }

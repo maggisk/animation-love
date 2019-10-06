@@ -124,7 +124,9 @@ function Animation:draw()
     local x = thisLayer.x * (1 - pos) + nextLayer.x * pos
     local y = thisLayer.y * (1 - pos) + nextLayer.y * pos
     local angle = thisLayer.angle * (1 - pos) + nextLayer.angle * pos
-    love.graphics.draw(image, x, y, angle, 1, 1, w / 2, h / 2)
+    local scaleX = (thisLayer.scaleX or thisFrame.scaleX) * (1 - pos) + (nextLayer.scaleX or nextFrame.scaleX) * pos
+    local scaleY = (thisLayer.scaleY or thisFrame.scaleY) * (1 - pos) + (nextLayer.scaleY or nextFrame.scaleY) * pos
+    love.graphics.draw(image, x, y, angle, scaleX, scaleY, w / 2, h / 2)
   end
 end
 
