@@ -673,13 +673,28 @@ function ShearPicker:draw()
   self.shearY:render({text = "y-axis: " .. tostring(l.shearY)}, dir.down)
 end
 
+local OpacityPicker = Element:extend()
+function OpacityPicker:new(attr)
+  Element.new(self, attr)
+  self.button = self:add(Button({align = 'left', width = 100})):on('wheelmoved', function(_, e)
+    self.context.dispatch('CHANGE_OPACITY', e.scrollY)
+    return false
+  end)
+end
+
+function OpacityPicker:draw()
+  title('Opacity')
+  local opacity = self.context.state.animation.framelayers[self.context.state.frame.id][self.context.state.layer.id].opacity
+  self.button:render({text = tostring(opacity)}, dir.down)
+end
+
 local Advanced = Element:extend()
 function Advanced:new(attr)
   Element.new(self, attr,
     EasingPicker(),
-    ScalePicker({width = 150}),
-    ShearPicker({width = 150})
-  )
+    ScalePicker({width = 120}),
+    ShearPicker({width = 120}),
+    OpacityPicker({width = 120}))
   self.isOpen = false
   self:on('toggleadvanced', function() self.isOpen = not self.isOpen end)
 end
@@ -710,11 +725,6 @@ function Advanced:draw()
       move({by = {x = pad}})
     end
   end
-end
-
-function Advanced:title(text)
-  local w, h = Text.print(text, 20)
-  move({by = {y = h + 10}})
 end
 
 local Window = Element:extend()

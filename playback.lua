@@ -113,6 +113,7 @@ function Animation:seek(time)
 end
 
 function Animation:draw()
+  local r, g, b, a = love.graphics.getColor()
   local thisFrame = self.data.frames[self.frame]
   local nextFrame = self.data.frames[self.frame + 1] or thisFrame
   for i = #self.data.layers, 1, -1 do
@@ -129,10 +130,12 @@ function Animation:draw()
     local shearX = (thisLayer.shearX or thisFrame.shearX) * (1 - pos) + (nextLayer.shearX or nextFrame.shearX) * pos
     local shearY = (thisLayer.shearY or thisFrame.shearY) * (1 - pos) + (nextLayer.shearY or nextFrame.shearY) * pos
     love.graphics.push()
+    love.graphics.setColor(1, 1, 1, thisLayer.opacity)
     love.graphics.shear(shearX, shearY)
     love.graphics.draw(image, x, y, angle, scaleX, scaleY, w / 2, h / 2)
     love.graphics.pop()
   end
+  love.graphics.setColor(r, g, b, a)
 end
 
 local function fromDirectory()

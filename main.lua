@@ -179,7 +179,12 @@ end
 function eventhandler.CHANGE_SHEARING(e)
   assert(state.layer)
   local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
-  framelayer[e.which] = (framelayer[e.which] or 0) + e.v * 0.1
+  framelayer[e.which] = (framelayer[e.which] or 0) + e.v * 0.05
+end
+
+function eventhandler.CHANGE_OPACITY(diff)
+  local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
+  framelayer.opacity = util.clamp(framelayer.opacity + 0.05 * diff, 0, 1)
 end
 
 function eventhandler.BROADCAST(data)
