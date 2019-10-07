@@ -81,6 +81,10 @@ function eventhandler.ZOOM(diff)
   for i = 1, -diff do state.zoom = state.zoom * (9/10) end
 end
 
+function eventhandler.CHANGE_DURATION(diff)
+  state.frame.duration = math.max(0.01, state.frame.duration + diff * 0.01)
+end
+
 function eventhandler.MOVE_CENTER(e)
   state.offsetX = state.offsetX + e.x
   state.offsetY = state.offsetY + e.y
@@ -166,14 +170,9 @@ function eventhandler.SELECT_EASING(name)
 end
 
 function eventhandler.CHANGE_SCALE(e)
-  assert(state.layer)
   local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
   framelayer[e.which] = framelayer[e.which] or 1
-  if e.v > 0 then
-    framelayer[e.which] = framelayer[e.which] * (10/9) * e.v
-  else
-    framelayer[e.which] = framelayer[e.which] * (9/10) * -e.v
-  end
+  framelayer[e.which] = framelayer[e.which] + 0.05 * e.v
 end
 
 function eventhandler.CHANGE_SHEARING(e)
@@ -187,9 +186,10 @@ function eventhandler.CHANGE_OPACITY(diff)
   framelayer.opacity = util.clamp(framelayer.opacity + 0.05 * diff, 0, 1)
 end
 
-function eventhandler.CHANGE_ANGLE(diff)
+function eventhandler.CHANGE_ANGLE(e)
   local framelayer = state.animation.framelayers[state.frame.id][state.layer.id]
-  framelayer.angle = framelayer.angle + util.degToRad(diff)
+  local angle = math.atan2(e.toY - e.y, e.toX - e.x)
+  framelayer.angle = framelayer.angle + util.shortestRotation(framelayer.angle % (math.pi * 2), angle)
 end
 
 function eventhandler.TOGGLE_ROTATION_DIRECTION()

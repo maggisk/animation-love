@@ -84,6 +84,21 @@ function util.matchall(s, pattern)
   return parts
 end
 
+function util.round(n)
+  return math.floor(n + 0.5)
+end
+
+function util.formatFloat(v, nminor)
+  nminor = nminor or 0
+  s = tostring(util.round(v * 10^nminor) / 10^nminor)
+  local split = util.list(s:gmatch('([^\\.]+)'))
+  s = split[1]
+  if nminor > 0 then
+    s = s .. '.' .. (split[2] or 0)
+  end
+  return s
+end
+
 function util.shortestRotation(a1, a2)
   local angle = a2 - a1
   if angle > math.pi then
@@ -91,7 +106,7 @@ function util.shortestRotation(a1, a2)
   elseif angle < -math.pi then
     angle = angle + 2 * math.pi
   end
-  return a1, angle
+  return angle
 end
 
 function util.last(t)

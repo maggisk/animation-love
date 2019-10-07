@@ -52,6 +52,12 @@ local function first(iter, default)
   return default
 end
 
+local function rebind(obj, methodName)
+  return function(_, ...)
+    return obj[methodName](obj, ...)
+  end
+end
+
 local function background(color, ...)
   local r, g, b, a = love.graphics.getColor()
   love.graphics.setColor(color)
@@ -270,6 +276,9 @@ function Element:layout(dir)
 end
 
 function Element:draw()
+  if self.attr.draw then
+    self.attr.draw(self)
+  end
 end
 
 local Button = Element:extend()
@@ -306,7 +315,7 @@ function Button:draw()
   local tw, th = Text.getDimensions(self.attr.text, self.attr.fontsize)
   self.width = self.attr.width or tw + (self.attr.paddingX or 0) * 2
   self.height = self.attr.height or th + (self.attr.paddingY or 0) * 2
-  background(theme.background, 0, 0, self.width, self.height)
+  background(self.attr.background or theme.background, 0, 0, self.width, self.height)
   local x = self.width / 2 - tw / 2
   local y = self.height / 2 - th / 2
   if self.attr.align == "left" then
@@ -314,7 +323,7 @@ function Button:draw()
   elseif self.attr.align == "right" then
     x = self.width - self.paddingX - th -- untested
   end
-  love.graphics.setColor(theme.font)
+  love.graphics.setColor(self.attr.font or theme.font)
   Text.print(self.attr.text, self.attr.fontsize, x, y)
 end
 
@@ -597,7 +606,9 @@ function Easing:new(attr)
 end
 
 function Easing:draw()
-  self.button:render({width = self.attr.width, height = self.attr.height})
+  font = {1, 1, 1, 1}
+  if self.context.state.frame.easing == self.attr.name then font = colors.button.selected.background end
+  self.button:render({font = font, width = self.attr.width, height = self.attr.height})
   local bw = 120 -- button space
   local lw = self.attr.width - bw - 10 -- easing line width
   move({by = {x = bw, y = self.attr.height / 2}})
@@ -632,6 +643,19 @@ function EasingPicker:draw()
   self.height = y - self.y
 end
 
+local DurationPicker = Element:extend()
+function DurationPicker:new(attr)
+  Element.new(self, attr)
+  self.button = self:add(Button({width = 110})):on('wheelmoved', function(_, e)
+    self.context.dispatch('CHANGE_DURATION', e.scrollY)
+  end)
+end
+
+function DurationPicker:draw()
+  title('Duration')
+  self.button:render({text = util.formatFloat(self.context.state.frame.duration, 2) .. ' seconds'})
+end
+
 local ScalePicker = Element:extend()
 function ScalePicker:new(...)
   Element.new(self, ...)
@@ -650,8 +674,8 @@ function ScalePicker:draw()
     {"framelayers", self.context.state.frame.id, self.context.state.layer.id},
     {"layers", id = self.context.state.layer.id},
     {"frames", id = self.context.state.frame.id})
-  self.scaleX:render({text = "x-axis: " .. tostring(l.scaleX):sub(1, 4)}, dir.down)
-  self.scaleY:render({text = "y-axis: " .. tostring(l.scaleY):sub(1, 4)}, dir.down)
+  self.scaleX:render({text = "x-axis: " .. util.formatFloat(l.scaleX, 2)}, dir.down)
+  self.scaleY:render({text = "y-axis: " .. util.formatFloat(l.scaleY, 2)}, dir.down)
 end
 
 local ShearPicker = Element:extend()
@@ -672,8 +696,8 @@ function ShearPicker:draw()
     {"framelayers", self.context.state.frame.id, self.context.state.layer.id},
     {"layers", id = self.context.state.layer.id},
     {"frames", id = self.context.state.frame.id})
-  self.shearX:render({text = "x-axis: " .. tostring(l.shearX)}, dir.down)
-  self.shearY:render({text = "y-axis: " .. tostring(l.shearY)}, dir.down)
+  self.shearX:render({text = "x-axis: " .. util.formatFloat(l.shearX, 2)}, dir.down)
+  self.shearY:render({text = "y-axis: " .. util.formatFloat(l.shearY, 2)}, dir.down)
 end
 
 local OpacityPicker = Element:extend()
@@ -694,28 +718,52 @@ end
 local RotationPicker = Element:extend()
 function RotationPicker:new(attr)
   Element.new(self, attr)
-  self.angle = self:add(Button({align = 'left', width = 100})):on('wheelmoved', function(_, e)
-    self.context.dispatch('CHANGE_ANGLE', e.scrollY)
-    return false
-  end)
-  self.direction = self:add(Button({align = 'left', width = 100})):on('mouseclicked', function()
-    self.context.dispatch('TOGGLE_ROTATION_DIRECTION')
-    return false
+  self.r = 50 -- circle radius
+
+  local function onWindowMouseMoved(_, e)
+    self.context.dispatch('CHANGE_ANGLE', {x = self.centerX, y = self.centerY, toX = e.x, toY = e.y})
+  end
+
+  local function onWindowMouseReleased()
+    self:off('windowmousemoved', onWindowMouseMoved)
+    self:off('windowmousereleased', onWindowMouseReleased)
+  end
+
+  self.dot = self:add(Element({width = 30, height = 30, draw = function()
+    move({by = {x = -15, y = -15}})
+    love.graphics.setColor(colors.button.selected.background)
+    love.graphics.circle("fill", 15, 15, 6)
+    love.graphics.setColor(1, 1, 1, 1)
+  end})):on('mousepressed', function()
+    self:on('windowmousemoved', onWindowMouseMoved)
+    self:on('windowmousereleased', onWindowMouseReleased)
   end)
 end
 
 function RotationPicker:draw()
   title('Rotation')
+  move({by = {x = self.r, y = self.r}})
   local framelayer = self.context.state.animation.framelayers[self.context.state.frame.id][self.context.state.layer.id]
-  self.angle:render({text = util.radToDeg(framelayer.angle)}, dir.down)
-  local dirtext = ({[1] = 'Clockwise', [-1] = 'Counter-clockwise'})[framelayer.rotdir]
-  self.direction:render({text = dirtext}, dir.down)
+  love.graphics.points(0, 0)
+  love.graphics.setLineWidth(1)
+  love.graphics.circle("line", 0, 0, self.r)
+  self.centerX, self.centerY = whereami()
+  move({by = {x = math.cos(framelayer.angle) * self.r, y = math.sin(framelayer.angle) * self.r}})
+  self.dot:render()
+  move({to = {x = self.x, y = self.centerY + self.r + 10}})
+  local explain = 'clockwise'
+  if framelayer.angle < 0 then explain = 'counter-clockwise' end
+  local s = string.format("%s° %s",
+    util.formatFloat(math.abs(util.radToDeg(framelayer.angle)), 1),
+    explain)
+  Text.print(s, 20)
 end
 
 local Advanced = Element:extend()
 function Advanced:new(attr)
   Element.new(self, attr,
     EasingPicker(),
+    DurationPicker({width = 120}),
     ScalePicker({width = 120}),
     ShearPicker({width = 120}),
     OpacityPicker({width = 120}),
@@ -735,6 +783,10 @@ function Advanced:draw()
 
   local pad = 20
   move({by = {x = pad, y = pad}})
+
+  if not self.context.state.layer then
+    return -- TODO better mesage
+  end
 
   -- title
   love.graphics.setColor(colors.button.selected.background)
