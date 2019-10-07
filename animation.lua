@@ -70,6 +70,12 @@ function Animation:setIndex(type, id, index)
   return false
 end
 
+function Animation:isLayerVisibleAt(frame, x, y)
+  love.graphics.push()
+  love.graphics.origin()
+  -- TODO
+end
+
 function Animation:newLayer(blob, imagepath)
   local layer = {}
   layer.id = self:nextId()

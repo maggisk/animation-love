@@ -438,14 +438,50 @@ function Frame:draw()
   love.graphics.setStencilTest()
 end
 
+local JointMenu = Element:extend()
+function JointMenu:new(attr)
+  Element.new(self, attr)
+  self:on('windowmouseclicked', function()
+    self.isOpen = false
+  end)
+end
+
+function JointMenu:openAt(x, y)
+  self.x, self.y = x, y
+  self.isOpen = true
+end
+
+function JointMenu:getOverlappingLayers()
+  local layers = {}
+  for _, layer in ipairs(self.context.state.animation.layers) do
+    if self.context.state.animation:isLayerVisibleAt(self.context.state.frame, self.x, self.y) then
+      layers[#layers+1] = layer
+    end
+  end
+
+  local layerpairs = {}
+  for i = 2, #layers do
+    for j = i + 1, #layers do
+      table.insert(layerpairs, {layerpairs[i], layerpairs[j]})
+    end
+  end
+  return layerpairs
+end
+
+function JointMenu:draw()
+  self.button:render({text = 'join'})
+end
+
 local AnimationArea = Element:extend()
 function AnimationArea:new(attr)
   Element.new(self, attr)
   self.frame = self:add(Frame())
+  self.menu = self:add(JointMenu())
   self.clickcount = {}
 
   self:on('wheelmoved', self.onWheelMoved)
   self:on('mousepressed', self.onMousePressed)
+  self:on('mouseclicked', self.onMouseClicked)
   self:on('windowmousereleased', self.onWindowMouseReleased)
   self:on('toggleplay', self.onTogglePlay)
 end
@@ -466,6 +502,12 @@ function AnimationArea:onMousePressed(e)
       local s = self.context.state
       self.rotation = {x = e.x, y = e.y, angle = s.animation.framelayers[s.frame.id][s.layer.id].angle}
     end
+  end
+end
+
+function AnimationArea:onMouseClicked(e)
+  if e.button == 2 then
+    self.menu:openAt(e.x, e.y)
   end
 end
 
@@ -523,6 +565,11 @@ function AnimationArea:draw()
     self.frame:render(util.extend(attr, {frame = frame - 1, shader = util.solidColorShader(0, 0, 0, 0.1)}))
     self.frame:render(util.extend(attr, {frame = frame + 1, shader = util.solidColorShader(1, 1, 0, 0.15)}))
     self.frame:render(util.extend(attr, {frame = frame, shader = false}))
+  end
+
+  if self.menu.isOpen then
+    move({to = self.menu})
+    self.menu:render()
   end
 end
 
